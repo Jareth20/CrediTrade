@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+{% block title %}Sugerencias | {{ nota.numero_titulo }}{% endblock %}
+{% block content %}
+<div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-3"><div><div class="eyebrow">Revisión humana obligatoria</div><h1 class="h3 mb-1">Sugerencias para {{ nota.numero_titulo }}</h1><p class="text-muted mb-0">Aceptar modifica el campo y deja un evento; rechazar conserva el valor actual.</p></div><a class="btn btn-outline-secondary" href="{% url 'nota_detail' nota.pk %}"><i class="bi bi-arrow-left me-1"></i>Expediente</a></div>
+<div class="row g-3 mt-2">
+{% for sug in sugerencias %}
+<div class="col-lg-6"><div class="soft-card p-4 h-100 suggestion-card {% if sug.estado == 'ACEPTADA' %}suggestion-accepted{% elif sug.estado == 'RECHAZADA' %}suggestion-rejected{% endif %}">
+  <div class="d-flex justify-content-between gap-2"><div><div class="eyebrow">{{ sug.campo }}</div><h2 class="h5 mb-1">{{ sug.valor_sugerido }}</h2></div><span class="status-pill">{{ sug.get_estado_display }}</span></div>
+  <div class="small text-muted mt-2">Actual: <strong>{{ sug.valor_actual|default:'vacío' }}</strong></div>
+  <div class="small mt-3"><strong>Fuente:</strong> {{ sug.fuente }}<br><strong>Evidencia:</strong> {{ sug.evidencia|default:'No especificada' }}<br><strong>Confianza:</strong> {{ sug.confianza|floatformat:2 }}</div>
+  {% if sug.estado == 'PENDIENTE' %}<div class="d-flex gap-2 mt-4"><form method="post" action="{% url 'suggestion_accept' sug.pk %}">{% csrf_token %}<button class="btn btn-primary btn-sm" type="submit"><i class="bi bi-check-lg me-1"></i>Aceptar</button></form><form method="post" action="{% url 'suggestion_reject' sug.pk %}">{% csrf_token %}<button class="btn btn-outline-danger btn-sm" type="submit"><i class="bi bi-x-lg me-1"></i>Rechazar</button></form></div>{% endif %}
+</div></div>
+{% empty %}<div class="col-12"><div class="soft-card p-5 text-center text-muted">No hay sugerencias generadas para este caso.</div></div>{% endfor %}
+</div>
+{% endblock %}

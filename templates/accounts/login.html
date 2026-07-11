@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+{% block title %}Ingreso | CrediTrade{% endblock %}
+{% block content %}
+<div class="login-shell">
+  <div class="login-card soft-card">
+    <div class="text-center mb-4">
+      <div class="brand-mark brand-mark-lg mx-auto mb-3"><i class="bi bi-stars"></i></div>
+      <h1 class="h3 mb-2">CrediTrade</h1>
+      <p class="text-muted mb-0">Ingreso seguro para operadores de la casa de valores</p>
+    </div>
+    <form method="post" novalidate>
+      {% csrf_token %}
+      {% if form.non_field_errors %}
+      <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+      {% endif %}
+      <div class="mb-3">
+        <label class="form-label" for="{{ form.username.id_for_label }}">Usuario</label>
+        {{ form.username }}
+      </div>
+      <div class="mb-4">
+        <label class="form-label" for="{{ form.password.id_for_label }}">Contraseña</label>
+        {{ form.password }}
+      </div>
+      <button class="btn btn-primary w-100" type="submit">Ingresar</button>
+    </form>
+    <div class="tiny text-muted mt-4 text-center">Los roles y permisos son administrados por un superusuario.</div>
+  </div>
+</div>
+{% endblock %}

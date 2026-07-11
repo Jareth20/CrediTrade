@@ -1,0 +1,35 @@
+from django.urls import path
+
+from . import views
+
+urlpatterns = [
+    path("", views.dashboard, name="dashboard"),
+    path("clientes/", views.cliente_list, name="cliente_list"),
+    path("clientes/nuevo/", views.cliente_create, name="cliente_create"),
+    path("clientes/<uuid:pk>/", views.cliente_detail, name="cliente_detail"),
+    path("notas/", views.nota_list, name="nota_list"),
+    path("notas/nueva/", views.nota_create, name="nota_create"),
+    path("notas/<uuid:pk>/", views.nota_detail, name="nota_detail"),
+    path("notas/<uuid:pk>/editar/", views.nota_edit, name="nota_edit"),
+    path("notas/<uuid:pk>/documentos/nuevo/", views.documento_add, name="documento_add"),
+    path("notas/<uuid:pk>/enviar-validacion/", views.nota_submit_validation, name="nota_submit_validation"),
+    path("antecedentes/", views.antecedentes, name="antecedentes"),
+    path("notas/<uuid:pk>/ia/sugerencias/", views.ai_generate_suggestions, name="ai_generate_suggestions"),
+    path("notas/<uuid:pk>/sugerencias/", views.suggestion_review, name="suggestion_review"),
+    path("sugerencias/<uuid:suggestion_id>/aceptar/", views.suggestion_accept, name="suggestion_accept"),
+    path("sugerencias/<uuid:suggestion_id>/rechazar/", views.suggestion_reject, name="suggestion_reject"),
+    path("validacion/", views.validation_queue, name="validation_queue"),
+    path("validacion/<uuid:pk>/", views.validation_detail, name="validation_detail"),
+    path("validacion/<uuid:pk>/ejecutar/", views.validation_run, name="validation_run"),
+    path("validacion/<uuid:pk>/decidir/", views.validation_decide, name="validation_decide"),
+    path("negociacion/", views.negotiation_queue, name="negotiation_queue"),
+    path("negociacion/<uuid:pk>/editar/", views.negotiation_edit, name="negotiation_edit"),
+    path("negociacion/<uuid:pk>/reporte/", views.report_generate, name="report_generate"),
+    path("reportes/<uuid:report_id>/", views.report_detail, name="report_detail"),
+    path("reportes/<uuid:report_id>/pdf/", views.report_pdf, name="report_pdf"),
+    path("negociacion/<uuid:pk>/solicitar-confirmaciones/", views.approval_requests_create, name="approval_requests_create"),
+    path("negociacion/<uuid:pk>/enlaces/", views.approval_links, name="approval_links"),
+    path("confirmar/<uuid:token>/", views.public_approval, name="public_approval"),
+    path("notas/<uuid:pk>/cierre-demo/", views.close_demo, name="close_demo"),
+    path("api/clientes/buscar/", views.api_client_lookup, name="api_client_lookup"),
+]

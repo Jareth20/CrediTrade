@@ -1,0 +1,8 @@
+{% extends 'base.html' %}
+{% block title %}Cola de validación | CrediTrade{% endblock %}
+{% block content %}
+<div class="page-header"><div class="eyebrow">Operador 2 · Contador</div><h1 class="h3 mb-1">Cola de validación</h1><p class="text-muted mb-0">Casos que completaron recepción y requieren controles.</p></div>
+<div class="soft-card p-3 p-lg-4 mt-4"><div class="table-responsive"><table class="table align-middle mb-0"><thead><tr><th>Título</th><th>Titular</th><th>Valores</th><th>Documentos</th><th>Recepcionista</th><th></th></tr></thead><tbody>
+{% for nota in notas %}<tr><td><strong>{{ nota.numero_titulo }}</strong><div class="small text-muted">{{ nota.enviado_validacion_en|date:'d/m/Y H:i' }}</div></td><td>{{ nota.cliente_vendedor.nombre_razon_social }}<div class="small text-muted">{{ nota.cliente_vendedor.ruc_identificacion }}</div></td><td class="small">Nominal ${{ nota.valor_nominal|floatformat:2 }}<br>Saldo ${{ nota.saldo_disponible|floatformat:2 }}</td><td>{{ nota.documentos.count }}</td><td>{{ nota.recepcionista.get_full_name|default:nota.recepcionista.username }}</td><td class="text-end"><a class="btn btn-sm btn-primary" href="{% url 'validation_detail' nota.pk %}">Validar</a></td></tr>{% empty %}<tr><td colspan="6" class="text-center text-muted py-5">No hay casos pendientes.</td></tr>{% endfor %}
+</tbody></table></div></div>
+{% endblock %}

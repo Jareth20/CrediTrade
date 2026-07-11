@@ -1,0 +1,31 @@
+{% extends 'base.html' %}
+{% block title %}Clientes | CrediTrade{% endblock %}
+{% block content %}
+<div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-3">
+  <div><h1 class="h3 mb-1">Clientes</h1><p class="text-muted mb-0">Compradores, vendedores y autorizaciones registradas.</p></div>
+  {% if user.es_recepcionista or user.es_vendedor or user.is_superuser %}<a class="btn btn-primary" href="{% url 'cliente_create' %}"><i class="bi bi-person-plus me-1"></i>Registrar cliente</a>{% endif %}
+</div>
+<div class="soft-card p-3 p-lg-4 mt-4">
+  <form class="row g-2 mb-3" method="get">
+    <div class="col-md-9"><input class="form-control" name="q" value="{{ query }}" placeholder="Buscar por RUC, razón social o nombre comercial"></div>
+    <div class="col-md-3 d-grid"><button class="btn btn-outline-primary" type="submit"><i class="bi bi-search me-1"></i>Buscar</button></div>
+  </form>
+  <div class="table-responsive">
+    <table class="table align-middle mb-0">
+      <thead><tr><th>Cliente</th><th>RUC/ID</th><th>Rol</th><th>Estado SRI</th><th>Autorización</th><th></th></tr></thead>
+      <tbody>
+      {% for cliente in clientes %}
+        <tr>
+          <td><strong>{{ cliente.nombre_razon_social }}</strong>{% if cliente.nombre_comercial %}<div class="small text-muted">{{ cliente.nombre_comercial }}</div>{% endif %}</td>
+          <td>{{ cliente.ruc_identificacion }}</td>
+          <td>{{ cliente.get_tipo_relacion_display }}</td>
+          <td><span class="status-pill">{{ cliente.get_estado_cuenta_sri_display }}</span></td>
+          <td>{% if cliente.autorizacion_consulta %}<span class="text-success"><i class="bi bi-check-circle"></i> Sí</span>{% else %}<span class="text-warning"><i class="bi bi-exclamation-circle"></i> No</span>{% endif %}</td>
+          <td class="text-end"><a class="btn btn-sm btn-outline-secondary" href="{% url 'cliente_detail' cliente.pk %}">Ver</a></td>
+        </tr>
+      {% empty %}<tr><td colspan="6" class="text-center text-muted py-4">No se encontraron clientes.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

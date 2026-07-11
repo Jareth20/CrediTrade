@@ -1,0 +1,70 @@
+{% extends 'base.html' %}
+{% block title %}Panel | CrediTrade{% endblock %}
+{% block content %}
+<div class="page-header d-flex justify-content-between align-items-start flex-wrap gap-3">
+  <div>
+    <div class="eyebrow">{{ user.rol_nombre }}</div>
+    <h1 class="h2 mb-1">Panel operativo</h1>
+    <p class="text-muted mb-0">Trazabilidad y asistencia humana en cada fase del expediente.</p>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    {% if user.es_recepcionista or user.is_superuser %}
+      <a class="btn btn-primary" href="{% url 'nota_create' %}"><i class="bi bi-plus-lg me-1"></i>Nueva nota</a>
+      <a class="btn btn-outline-primary" href="{% url 'cliente_create' %}"><i class="bi bi-person-plus me-1"></i>Nuevo cliente</a>
+    {% endif %}
+    {% if user.es_contador or user.is_superuser %}
+      <a class="btn btn-primary" href="{% url 'validation_queue' %}"><i class="bi bi-shield-check me-1"></i>Abrir validaciones</a>
+    {% endif %}
+    {% if user.es_vendedor or user.is_superuser %}
+      <a class="btn btn-primary" href="{% url 'negotiation_queue' %}"><i class="bi bi-briefcase me-1"></i>Abrir negociaciones</a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="row g-3 mt-2">
+  <div class="col-6 col-xl"><div class="metric-card soft-card"><span>Expedientes</span><strong>{{ total_notas }}</strong></div></div>
+  <div class="col-6 col-xl"><div class="metric-card soft-card"><span>Clientes</span><strong>{{ total_clientes }}</strong></div></div>
+  <div class="col-6 col-xl"><div class="metric-card soft-card"><span>Por validar</span><strong>{{ pendientes_validacion }}</strong></div></div>
+  <div class="col-6 col-xl"><div class="metric-card soft-card"><span>Por negociar</span><strong>{{ listas_negociacion }}</strong></div></div>
+  <div class="col-6 col-xl"><div class="metric-card soft-card"><span>Confirmaciones</span><strong>{{ pendientes_confirmacion }}</strong></div></div>
+</div>
+
+<div class="row g-4 mt-1">
+  <div class="col-lg-8">
+    <div class="soft-card p-3 p-lg-4">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2 class="h5 mb-0">Actividad reciente</h2>
+        <a class="small text-decoration-none" href="{% url 'nota_list' %}">Ver todo</a>
+      </div>
+      <div class="table-responsive">
+        <table class="table align-middle mb-0">
+          <thead><tr><th>Título</th><th>Titular</th><th>Estado</th><th>Actualizado</th></tr></thead>
+          <tbody>
+          {% for nota in recientes %}
+            <tr>
+              <td><a href="{% url 'nota_detail' nota.pk %}" class="fw-semibold text-decoration-none">{{ nota.numero_titulo }}</a></td>
+              <td>{{ nota.cliente_vendedor.nombre_razon_social }}</td>
+              <td><span class="status-pill">{{ nota.get_estado_flujo_display }}</span></td>
+              <td class="text-muted small">{{ nota.actualizado_en|date:'d/m/Y H:i' }}</td>
+            </tr>
+          {% empty %}
+            <tr><td colspan="4" class="text-center text-muted py-4">Todavía no hay expedientes.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="soft-card p-4 h-100">
+      <h2 class="h5">Flujo mínimo</h2>
+      <ol class="workflow-list">
+        <li><strong>Recepción:</strong> datos, antecedentes, documentos y sugerencias.</li>
+        <li><strong>Validación:</strong> existencia, saldo, bloqueos, riesgos y aprobación.</li>
+        <li><strong>Negociación:</strong> orden, reporte, confirmaciones y solicitud de cierre.</li>
+      </ol>
+      <div class="info-note mt-3"><i class="bi bi-person-check me-2"></i>Ninguna sugerencia sustituye la decisión del operador.</div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,74 @@
+{% load static %}
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="MVP de asistencia inteligente para notas de crédito tributarias">
+  <title>{% block title %}CrediTrade{% endblock %}</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <link rel="stylesheet" href="{% static 'css/styles.css' %}">
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+{% if user.is_authenticated %}
+<nav class="navbar navbar-expand-lg navbar-light app-navbar sticky-top">
+  <div class="container-fluid px-lg-4">
+    <a class="navbar-brand fw-bold d-flex align-items-center gap-2" href="{% url 'dashboard' %}">
+      <span class="brand-mark"><i class="bi bi-stars"></i></span>
+      CrediTrade
+    </a>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav" aria-controls="mainNav" aria-expanded="false" aria-label="Abrir navegación">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="mainNav">
+      <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+        <li class="nav-item"><a class="nav-link" href="{% url 'nota_list' %}"><i class="bi bi-folder2-open me-1"></i>Expedientes</a></li>
+        <li class="nav-item"><a class="nav-link" href="{% url 'cliente_list' %}"><i class="bi bi-people me-1"></i>Clientes</a></li>
+        {% if user.es_recepcionista or user.is_superuser %}
+        <li class="nav-item"><a class="nav-link" href="{% url 'antecedentes' %}"><i class="bi bi-search me-1"></i>Antecedentes</a></li>
+        {% endif %}
+        {% if user.es_contador or user.is_superuser %}
+        <li class="nav-item"><a class="nav-link" href="{% url 'validation_queue' %}"><i class="bi bi-shield-check me-1"></i>Validación</a></li>
+        {% endif %}
+        {% if user.es_vendedor or user.is_superuser %}
+        <li class="nav-item"><a class="nav-link" href="{% url 'negotiation_queue' %}"><i class="bi bi-briefcase me-1"></i>Negociación</a></li>
+        {% endif %}
+      </ul>
+      <div class="d-flex align-items-center gap-3">
+        <div class="text-end d-none d-md-block">
+          <div class="small fw-semibold">{{ user.get_full_name|default:user.username }}</div>
+          <div class="text-muted tiny">{{ user.rol_nombre }}</div>
+        </div>
+        <form method="post" action="{% url 'accounts:logout' %}">
+          {% csrf_token %}
+          <button class="btn btn-sm btn-outline-secondary" type="submit"><i class="bi bi-box-arrow-right"></i></button>
+        </form>
+      </div>
+    </div>
+  </div>
+</nav>
+{% endif %}
+
+<main class="container-fluid px-3 px-lg-4 py-4">
+  {% if messages %}
+  <div class="messages-wrap">
+    {% for message in messages %}
+      <div class="alert alert-{{ message.tags|default:'info' }} alert-dismissible fade show soft-alert" role="alert">
+        {{ message }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Cerrar"></button>
+      </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% block content %}{% endblock %}
+</main>
+
+<footer class="container-fluid px-4 pb-4 text-center text-muted tiny">
+  MVP demostrativo. Las sugerencias de IA requieren verificación humana; no ejecuta liquidación, transferencia ni endoso.
+</footer>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+{% block extra_js %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,32 @@
+{% extends 'base.html' %}
+{% block title %}Validar {{ nota.numero_titulo }} | CrediTrade{% endblock %}
+{% block content %}
+<div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-3"><div><div class="eyebrow">Operador 2 · Contador</div><h1 class="h3 mb-1">Validación de {{ nota.numero_titulo }}</h1><p class="text-muted mb-0">Las reglas comparan la base interna con una fuente simulada SRI/DECEVALE.</p></div><a class="btn btn-outline-secondary" href="{% url 'validation_queue' %}"><i class="bi bi-arrow-left me-1"></i>Cola</a></div>
+<div class="row g-4 mt-1">
+  <div class="col-xl-8">
+    <div class="soft-card p-4 mb-4">
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2"><h2 class="h5 mb-0">Datos recibidos</h2><a class="small text-decoration-none" href="{% url 'nota_detail' nota.pk %}">Abrir expediente completo</a></div>
+      <div class="row g-3 mt-1"><div class="col-md-4"><div class="detail-block"><span>Titular</span><strong>{{ nota.cliente_vendedor.nombre_razon_social }}</strong><small>{{ nota.cliente_vendedor.ruc_identificacion }}</small></div></div><div class="col-md-4"><div class="detail-block"><span>Tipo</span><strong>{{ nota.get_tipo_nota_display }}</strong></div></div><div class="col-md-4"><div class="detail-block"><span>Origen</span><strong>{{ nota.get_origen_tributario_display }}</strong></div></div><div class="col-md-4"><div class="detail-block"><span>Nominal</span><strong>${{ nota.valor_nominal|floatformat:2 }}</strong></div></div><div class="col-md-4"><div class="detail-block"><span>Saldo</span><strong>${{ nota.saldo_disponible|floatformat:2 }}</strong></div></div><div class="col-md-4"><div class="detail-block"><span>Documentos</span><strong>{{ nota.documentos.count }}</strong></div></div></div>
+    </div>
+
+    {% if validacion %}
+    <div class="soft-card p-4">
+      <div class="d-flex justify-content-between align-items-center mb-3"><h2 class="h5 mb-0">Resultado comparativo</h2><span class="status-pill status-main">{{ validacion.get_resultado_display }}</span></div>
+      <div class="row g-3"><div class="col-md-3"><div class="detail-block"><span>Existe</span><strong>{% if validacion.existe %}Sí{% else %}No{% endif %}</strong></div></div><div class="col-md-3"><div class="detail-block"><span>Saldo fuente</span><strong>{% if validacion.saldo_fuente != None %}${{ validacion.saldo_fuente|floatformat:2 }}{% else %}-{% endif %}</strong></div></div><div class="col-md-3"><div class="detail-block"><span>Estado fuente</span><strong>{{ validacion.estado_fuente }}</strong></div></div><div class="col-md-3"><div class="detail-block"><span>Bloqueo</span><strong>{% if validacion.bloqueada %}Sí{% else %}No{% endif %}</strong></div></div></div>
+      <div class="row g-4 mt-1">
+        <div class="col-md-6"><h3 class="h6">Campos faltantes</h3>{% for item in validacion.campos_faltantes %}<div class="validation-item"><i class="bi bi-exclamation-circle"></i>{{ item }}</div>{% empty %}<div class="text-success small"><i class="bi bi-check-circle me-1"></i>Sin faltantes detectados.</div>{% endfor %}</div>
+        <div class="col-md-6"><h3 class="h6">Inconsistencias</h3>{% for item in validacion.inconsistencias %}<div class="validation-item"><i class="bi bi-arrow-left-right"></i><span><strong>{{ item.campo }}</strong><br>Registrado: {{ item.registrado }} · Fuente: {{ item.fuente }}</span></div>{% empty %}<div class="text-success small"><i class="bi bi-check-circle me-1"></i>Sin inconsistencias.</div>{% endfor %}</div>
+        <div class="col-md-6"><h3 class="h6">Posibles duplicados</h3>{% for item in validacion.duplicados %}<div class="validation-item"><i class="bi bi-copy"></i><span>{{ item.numero_titulo }} · {{ item.estado }}<br><small>{{ item.razon }}</small></span></div>{% empty %}<div class="text-success small"><i class="bi bi-check-circle me-1"></i>Sin duplicados relevantes.</div>{% endfor %}</div>
+        <div class="col-md-6"><h3 class="h6">Riesgos</h3>{% for item in validacion.coincidencias_riesgo %}<div class="validation-item risk"><i class="bi bi-shield-exclamation"></i><span><strong>{{ item.tipo }} · {{ item.severidad }}</strong><br>{{ item.detalle }}</span></div>{% empty %}<div class="text-success small"><i class="bi bi-check-circle me-1"></i>Sin alertas de riesgo.</div>{% endfor %}</div>
+      </div>
+      <hr><h3 class="h6">Explicación asistida</h3><p class="text-muted pre-line mb-2">{{ validacion.explicacion_ia }}</p><div class="info-note"><strong>Siguiente acción sugerida:</strong> {{ validacion.siguiente_accion }}</div>
+    </div>
+    {% else %}
+    <div class="soft-card p-5 text-center"><i class="bi bi-database-check display-5 text-primary"></i><h2 class="h5 mt-3">Ejecuta la validación</h2><p class="text-muted">Se revisará existencia, saldo, estado, bloqueos, faltantes, duplicados y riesgos.</p><form method="post" action="{% url 'validation_run' nota.pk %}">{% csrf_token %}<button class="btn btn-primary" type="submit"><i class="bi bi-play-fill me-1"></i>Validar ahora</button></form></div>
+    {% endif %}
+  </div>
+  <div class="col-xl-4">
+    <div class="soft-card p-4 sticky-xl-top side-help"><h2 class="h5">Decisión del contador</h2>{% if validacion %}<form method="post" action="{% url 'validation_decide' nota.pk %}" novalidate>{% csrf_token %}{% for field in form %}<div class="mb-3"><label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}</div>{% endfor %}<button class="btn btn-primary w-100" type="submit">Registrar decisión</button></form>{% else %}<p class="text-muted small mb-0">La decisión se habilita después de ejecutar la comparación.</p>{% endif %}<div class="info-note mt-3">El resultado automático no reemplaza tu criterio. Puedes observar o rechazar incluso si la regla parece conforme.</div></div>
+  </div>
+</div>
+{% endblock %}

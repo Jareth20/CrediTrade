@@ -1,0 +1,11 @@
+{% extends 'base.html' %}
+{% block title %}Antecedentes | CrediTrade{% endblock %}
+{% block content %}
+<div class="page-header"><div class="eyebrow">Operador 1 · Recepción</div><h1 class="h3 mb-1">Buscar antecedentes</h1><p class="text-muted mb-0">Consulta por RUC, número de título o coincidencia de nombre.</p></div>
+<div class="soft-card p-4 mt-4">
+  <form class="row g-2" method="get"><div class="col-md-9"><input class="form-control form-control-lg" name="q" value="{{ query }}" placeholder="RUC, título o titular" autofocus></div><div class="col-md-3 d-grid"><button class="btn btn-primary" type="submit"><i class="bi bi-search me-1"></i>Buscar</button></div></form>
+</div>
+{% if query %}<div class="soft-card p-3 p-lg-4 mt-4"><div class="table-responsive"><table class="table align-middle mb-0"><thead><tr><th>Título</th><th>Titular/RUC</th><th>Datos reutilizables</th><th>Fuente y fecha</th><th>Estado</th></tr></thead><tbody>
+{% for nota in notas %}<tr><td><a href="{% url 'nota_detail' nota.pk %}" class="fw-semibold text-decoration-none">{{ nota.numero_titulo }}</a></td><td>{{ nota.cliente_vendedor.nombre_razon_social }}<div class="small text-muted">{{ nota.cliente_vendedor.ruc_identificacion }}</div></td><td class="small">{{ nota.get_tipo_nota_display }}<br>Nominal: ${{ nota.valor_nominal|floatformat:2 }} · Saldo: ${{ nota.saldo_disponible|floatformat:2 }}</td><td class="small">Base de datos interna<br>{{ nota.actualizado_en|date:'d/m/Y H:i' }}</td><td><span class="status-pill">{{ nota.get_estado_flujo_display }}</span></td></tr>{% empty %}<tr><td colspan="5" class="text-center text-muted py-4">No hay coincidencias.</td></tr>{% endfor %}
+</tbody></table></div></div>{% endif %}
+{% endblock %}

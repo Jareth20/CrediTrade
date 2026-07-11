@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+{% load static %}
+{% block title %}{{ titulo }} | CrediTrade{% endblock %}
+{% block content %}
+<div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-3">
+  <div><div class="eyebrow">Operador 1 · Recepción</div><h1 class="h3 mb-1">{{ titulo }}</h1><p class="text-muted mb-0">Los valores se guardan como borrador y pueden compararse con antecedentes.</p></div>
+  <a class="btn btn-outline-secondary" href="{% if nota %}{% url 'nota_detail' nota.pk %}{% else %}{% url 'nota_list' %}{% endif %}"><i class="bi bi-arrow-left me-1"></i>Volver</a>
+</div>
+<div class="row g-4 mt-1">
+  <div class="col-xl-8">
+    <div class="soft-card p-4">
+      <form method="post" novalidate>
+        {% csrf_token %}
+        {% if form.non_field_errors %}<div class="alert alert-danger">{{ form.non_field_errors }}</div>{% endif %}
+        <div class="row g-3">
+          {% for field in form %}
+          <div class="{% if field.name == 'observaciones_recepcion' %}col-12{% else %}col-md-6{% endif %}">
+            <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}{% if field.field.required %} <span class="text-danger">*</span>{% endif %}</label>
+            {{ field }}
+            {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
+            {% for error in field.errors %}<div class="text-danger small mt-1">{{ error }}</div>{% endfor %}
+          </div>
+          {% endfor %}
+        </div>
+        <div class="d-flex justify-content-end gap-2 mt-4"><a class="btn btn-outline-secondary" href="{% url 'nota_list' %}">Cancelar</a><button class="btn btn-primary" type="submit"><i class="bi bi-save me-1"></i>Guardar borrador</button></div>
+      </form>
+    </div>
+  </div>
+  <div class="col-xl-4">
+    <div class="soft-card p-4 sticky-xl-top side-help">
+      <h2 class="h5"><i class="bi bi-stars me-2"></i>Asistencia controlada</h2>
+      <p class="text-muted small">Después de crear el borrador podrás:</p>
+      <ul class="small ps-3 mb-0"><li>comparar casos por RUC o título;</li><li>generar sugerencias con Gemini o reglas locales;</li><li>aceptar o rechazar cada campo;</li><li>adjuntar URL o texto de respaldo.</li></ul>
+      <div class="info-note mt-3">La IA no consulta por sí sola al SRI ni a DECEVALE.</div>
+      <div id="historical-suggestions" class="historical-panel mt-3 d-none" aria-live="polite">
+        <div class="small text-uppercase text-muted fw-semibold mb-2">Antecedentes del cliente</div>
+        <div id="historical-content"></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script src="{% static 'js/note_form.js' %}"></script>
+{% endblock %}
