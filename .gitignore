@@ -12,3 +12,9 @@ media/
 .coverage
 .DS_Store
 .vercel/
+configurar_local.cmd
+configurar_vercel.cmd
+configurar_vercel.ps1
+iniciar_local.cmd
+migrar_neon.cmd
+probar_integraciones.cmd
