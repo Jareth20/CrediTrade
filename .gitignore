@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 *.sqlite3
 .env
+.env.example
 .env.local
 .venv/
 venv/
