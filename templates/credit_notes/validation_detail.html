@@ -11,7 +11,7 @@
 
     {% if validacion %}
     <div class="soft-card p-4">
-      <div class="d-flex justify-content-between align-items-center mb-3"><h2 class="h5 mb-0">Resultado comparativo</h2><span class="status-pill status-main">{{ validacion.get_resultado_display }}</span></div>
+      <div class="d-flex justify-content-between align-items-center mb-3"><h2 class="h5 mb-0">Resultado comparativo</h2><div class="d-flex gap-2"><a class="btn btn-sm btn-outline-primary" href="{% url 'validation_edit' validacion.pk %}">Editar</a><a class="btn btn-sm btn-outline-danger" href="{% url 'validation_delete' validacion.pk %}">Eliminar</a><span class="status-pill status-main">{{ validacion.get_resultado_display }}</span></div></div>
       <div class="row g-3"><div class="col-md-3"><div class="detail-block"><span>Existe</span><strong>{% if validacion.existe %}Sí{% else %}No{% endif %}</strong></div></div><div class="col-md-3"><div class="detail-block"><span>Saldo fuente</span><strong>{% if validacion.saldo_fuente != None %}${{ validacion.saldo_fuente|floatformat:2 }}{% else %}-{% endif %}</strong></div></div><div class="col-md-3"><div class="detail-block"><span>Estado fuente</span><strong>{{ validacion.estado_fuente }}</strong></div></div><div class="col-md-3"><div class="detail-block"><span>Bloqueo</span><strong>{% if validacion.bloqueada %}Sí{% else %}No{% endif %}</strong></div></div></div>
       <div class="row g-4 mt-1">
         <div class="col-md-6"><h3 class="h6">Campos faltantes</h3>{% for item in validacion.campos_faltantes %}<div class="validation-item"><i class="bi bi-exclamation-circle"></i>{{ item }}</div>{% empty %}<div class="text-success small"><i class="bi bi-check-circle me-1"></i>Sin faltantes detectados.</div>{% endfor %}</div>

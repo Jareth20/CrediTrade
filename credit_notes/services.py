@@ -27,7 +27,7 @@ def buscar_antecedentes(query):
     if not query:
         return NotaCredito.objects.none()
     return (
-        NotaCredito.objects.select_related("cliente_vendedor")
+        NotaCredito.objects.filter(eliminado_en__isnull=True).select_related("cliente_vendedor")
         .filter(
             Q(cliente_vendedor__ruc_identificacion__icontains=query)
             | Q(numero_titulo__icontains=query)
@@ -52,7 +52,7 @@ def _campos_faltantes(nota):
 
 def _duplicados(nota):
     duplicates = []
-    same_client = NotaCredito.objects.filter(
+    same_client = NotaCredito.objects.filter(eliminado_en__isnull=True).filter(
         cliente_vendedor=nota.cliente_vendedor,
         valor_nominal=nota.valor_nominal,
         saldo_disponible=nota.saldo_disponible,

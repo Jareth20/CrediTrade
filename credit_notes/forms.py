@@ -9,6 +9,7 @@ from .models import (
     DocumentoRespaldo,
     NotaCredito,
     OrdenNegociacion,
+    ValidacionNota,
     SolicitudAprobacion,
 )
 
@@ -105,12 +106,31 @@ class DocumentoRespaldoForm(BootstrapFormMixin, forms.ModelForm):
             "nombre",
             "archivo_url",
             "texto_extraido",
-            "hash_sha256",
             "fuente",
         ]
         widgets = {
             "texto_extraido": forms.Textarea(attrs={"rows": 4}),
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.apply_bootstrap()
+        self.fields["archivo_url"].help_text = "El hash SHA-256 se genera automáticamente y no puede editarse."
+
+
+class ValidacionNotaForm(BootstrapFormMixin, forms.ModelForm):
+    class Meta:
+        model = ValidacionNota
+        fields = ["fuente", "existe", "saldo_fuente", "estado_fuente", "bloqueada", "motivo_bloqueo", "campos_faltantes", "inconsistencias", "duplicados", "coincidencias_riesgo", "siguiente_accion", "explicacion_ia", "resultado"]
+        widgets = {"explicacion_ia": forms.Textarea(attrs={"rows": 4}), "siguiente_accion": forms.Textarea(attrs={"rows": 2})}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.apply_bootstrap()
+
+
+class DeleteReasonForm(BootstrapFormMixin, forms.Form):
+    motivo = forms.CharField(max_length=300, widget=forms.Textarea(attrs={"rows": 3}), label="Motivo de eliminación")
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

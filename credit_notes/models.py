@@ -1,4 +1,5 @@
 import uuid
+import hashlib
 from decimal import Decimal
 
 from django.conf import settings
@@ -63,6 +64,9 @@ class Cliente(models.Model):
     )
     creado_en = models.DateTimeField(auto_now_add=True, db_index=True)
     actualizado_en = models.DateTimeField(auto_now=True)
+    eliminado_en = models.DateTimeField(null=True, blank=True, db_index=True)
+    eliminado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="clientes_eliminados")
+    motivo_eliminacion = models.CharField(max_length=300, blank=True)
 
     class Meta:
         ordering = ["nombre_razon_social"]
@@ -212,6 +216,9 @@ class NotaCredito(models.Model):
     enviado_validacion_en = models.DateTimeField(null=True, blank=True)
     validado_en = models.DateTimeField(null=True, blank=True)
     iniciado_negociacion_en = models.DateTimeField(null=True, blank=True)
+    eliminado_en = models.DateTimeField(null=True, blank=True, db_index=True)
+    eliminado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="expedientes_eliminados")
+    motivo_eliminacion = models.CharField(max_length=300, blank=True)
 
     class Meta:
         ordering = ["-creado_en"]
@@ -326,6 +333,8 @@ class DocumentoRespaldo(models.Model):
             )
 
     def save(self, *args, **kwargs):
+        payload = (self.archivo_url or self.texto_extraido or "").strip().encode("utf-8")
+        self.hash_sha256 = hashlib.sha256(payload).hexdigest()
         self.full_clean()
         return super().save(*args, **kwargs)
 
@@ -449,6 +458,10 @@ class ValidacionNota(models.Model):
         related_name="validaciones_realizadas",
     )
     realizada_en = models.DateTimeField(auto_now_add=True, db_index=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+    eliminado_en = models.DateTimeField(null=True, blank=True, db_index=True)
+    eliminado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="validaciones_eliminadas")
+    motivo_eliminacion = models.CharField(max_length=300, blank=True)
 
     class Meta:
         ordering = ["-realizada_en"]
@@ -497,6 +510,9 @@ class OrdenNegociacion(models.Model):
     )
     creado_en = models.DateTimeField(auto_now_add=True)
     actualizado_en = models.DateTimeField(auto_now=True)
+    eliminado_en = models.DateTimeField(null=True, blank=True, db_index=True)
+    eliminado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="negociaciones_eliminadas")
+    motivo_eliminacion = models.CharField(max_length=300, blank=True)
 
     class Meta:
         indexes = [models.Index(fields=["estado", "creado_en"])]
@@ -622,3 +638,12 @@ class EventoTrazabilidad(models.Model):
 
     def __str__(self):
         return f"{self.accion} - {self.nota.numero_titulo}"
+
+
+class OperacionIdempotente(models.Model):
+    """Candado persistente: una misma operacion logica solo se ejecuta una vez."""
+    clave = models.CharField(max_length=255, unique=True)
+    tipo = models.CharField(max_length=80, db_index=True)
+    creada_en = models.DateTimeField(auto_now_add=True)
+    completada_en = models.DateTimeField(null=True, blank=True)
+    resultado_id = models.CharField(max_length=80, blank=True)

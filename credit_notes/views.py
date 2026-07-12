@@ -5,7 +5,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Count, Q
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -28,6 +28,8 @@ from .forms import (
     DocumentoRespaldoForm,
     NotaCreditoForm,
     OrdenNegociacionForm,
+    ValidacionNotaForm,
+    DeleteReasonForm,
 )
 from .models import (
     Cliente,
@@ -38,6 +40,8 @@ from .models import (
     ReporteIA,
     SolicitudAprobacion,
     SugerenciaIA,
+    ValidacionNota,
+    OperacionIdempotente,
 )
 from .pdf_reports import build_negotiation_pdf
 from .services import (
@@ -61,7 +65,7 @@ def _get_note_for_user(user, pk):
             "contador",
             "vendedor",
         ),
-        pk=pk,
+        pk=pk, eliminado_en__isnull=True,
     )
     if not _can_view_note(user, note):
         raise Http404
@@ -71,10 +75,10 @@ def _get_note_for_user(user, pk):
 @login_required
 def dashboard(request):
     user = request.user
-    base = NotaCredito.objects.all()
+    base = NotaCredito.objects.filter(eliminado_en__isnull=True)
     context = {
         "total_notas": base.count(),
-        "total_clientes": Cliente.objects.count(),
+        "total_clientes": Cliente.objects.filter(eliminado_en__isnull=True).count(),
         "pendientes_validacion": base.filter(
             estado_flujo=NotaCredito.EstadoFlujo.PENDIENTE_VALIDACION
         ).count(),
@@ -105,7 +109,7 @@ def dashboard(request):
 @login_required
 def cliente_list(request):
     query = request.GET.get("q", "").strip()
-    clients = Cliente.objects.select_related("creado_por")
+    clients = Cliente.objects.filter(eliminado_en__isnull=True).select_related("creado_por")
     if query:
         clients = clients.filter(
             Q(ruc_identificacion__icontains=query)
@@ -136,8 +140,8 @@ def cliente_create(request):
 
 @login_required
 def cliente_detail(request, pk):
-    client = get_object_or_404(Cliente, pk=pk)
-    notes = NotaCredito.objects.filter(
+    client = get_object_or_404(Cliente, pk=pk, eliminado_en__isnull=True)
+    notes = NotaCredito.objects.filter(eliminado_en__isnull=True).filter(
         Q(cliente_vendedor=client) | Q(cliente_comprador=client)
     ).select_related("cliente_vendedor", "cliente_comprador")[:30]
     return render(
@@ -151,7 +155,7 @@ def cliente_detail(request, pk):
 def nota_list(request):
     state = request.GET.get("estado", "").strip()
     query = request.GET.get("q", "").strip()
-    notes = NotaCredito.objects.select_related(
+    notes = NotaCredito.objects.filter(eliminado_en__isnull=True).select_related(
         "cliente_vendedor", "recepcionista", "contador", "vendedor"
     )
     if state:
@@ -236,11 +240,13 @@ def nota_edit(request, pk):
 @login_required
 def nota_detail(request, pk):
     note = _get_note_for_user(request.user, pk)
-    latest_validation = note.validaciones.first()
+    latest_validation = note.validaciones.filter(eliminado_en__isnull=True).first()
     pending_suggestions = note.sugerencias_ia.filter(
         estado=SugerenciaIA.Estado.PENDIENTE
     ).count()
     order = getattr(note, "orden_negociacion", None)
+    if order and order.eliminado_en:
+        order = None
     return render(
         request,
         "credit_notes/nota_detail.html",
@@ -283,6 +289,47 @@ def documento_add(request, pk):
     )
 
 
+def _soft_delete(instance, user, reason):
+    instance.eliminado_en = timezone.now()
+    instance.eliminado_por = user
+    instance.motivo_eliminacion = reason
+    instance.save(update_fields=["eliminado_en", "eliminado_por", "motivo_eliminacion"])
+
+
+def _delete_view(request, instance, title, redirect_name, note=None):
+    form = DeleteReasonForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        with transaction.atomic():
+            _soft_delete(instance, request.user, form.cleaned_data["motivo"])
+            if note:
+                registrar_evento(note, request.user, "REGISTRO_ELIMINADO", f"{title} eliminado lógicamente.", {"tipo": instance._meta.model_name, "id": str(instance.pk), "motivo": form.cleaned_data["motivo"]})
+        messages.success(request, "Registro eliminado con trazabilidad; el historial fue conservado.")
+        return redirect(redirect_name, **({"pk": note.pk} if note and redirect_name == "nota_detail" else {}))
+    return render(request, "credit_notes/confirm_delete.html", {"form": form, "titulo": title, "objeto": instance})
+
+
+@role_required(1, 3)
+def cliente_edit(request, pk):
+    client = get_object_or_404(Cliente, pk=pk, eliminado_en__isnull=True)
+    form = ClienteForm(request.POST or None, instance=client)
+    if request.method == "POST" and form.is_valid():
+        form.save(); messages.success(request, "Cliente actualizado.")
+        return redirect("cliente_detail", pk=client.pk)
+    return render(request, "credit_notes/form.html", {"form": form, "titulo": "Editar cliente"})
+
+
+@role_required(1, 3)
+def cliente_delete(request, pk):
+    client = get_object_or_404(Cliente, pk=pk, eliminado_en__isnull=True)
+    return _delete_view(request, client, "Eliminar cliente", "cliente_list")
+
+
+@role_required(1)
+def nota_delete(request, pk):
+    note = _get_note_for_user(request.user, pk)
+    return _delete_view(request, note, "Eliminar expediente", "nota_list")
+
+
 @role_required(1)
 @require_POST
 def nota_submit_validation(request, pk):
@@ -316,11 +363,19 @@ def ai_generate_suggestions(request, pk):
     }:
         messages.error(request, "Solo se generan sugerencias durante recepción/corrección.")
         return redirect("nota_detail", pk=note.pk)
+    key = f"sugerencias:{note.pk}:{note.actualizado_en.isoformat()}"
+    try:
+        OperacionIdempotente.objects.create(clave=key, tipo="SUGERENCIAS_IA")
+    except IntegrityError:
+        messages.info(request, "Esta solicitud ya fue procesada o continúa en curso. No se duplicarán datos.")
+        return redirect("suggestion_review", pk=note.pk)
     try:
         created = generar_sugerencias_nota(note, request.user)
     except GeminiServiceError as exc:
+        OperacionIdempotente.objects.filter(clave=key, completada_en__isnull=True).delete()
         messages.error(request, str(exc))
         return redirect("nota_detail", pk=note.pk)
+    OperacionIdempotente.objects.filter(clave=key).update(completada_en=timezone.now())
 
     if created:
         messages.success(
@@ -431,7 +486,7 @@ def suggestion_reject(request, suggestion_id):
 
 @role_required(2)
 def validation_queue(request):
-    notes = NotaCredito.objects.filter(
+    notes = NotaCredito.objects.filter(eliminado_en__isnull=True).filter(
         estado_flujo=NotaCredito.EstadoFlujo.PENDIENTE_VALIDACION
     ).select_related("cliente_vendedor", "recepcionista")
     return render(request, "credit_notes/validation_queue.html", {"notas": notes})
@@ -442,7 +497,7 @@ def validation_detail(request, pk):
     note = _get_note_for_user(request.user, pk)
     if note.estado_flujo != NotaCredito.EstadoFlujo.PENDIENTE_VALIDACION:
         messages.warning(request, "El caso no está pendiente de validación.")
-    validation = note.validaciones.first()
+    validation = note.validaciones.filter(eliminado_en__isnull=True).first()
     form = DecisionValidacionForm()
     return render(
         request,
@@ -458,6 +513,12 @@ def validation_run(request, pk):
     if note.estado_flujo != NotaCredito.EstadoFlujo.PENDIENTE_VALIDACION:
         messages.error(request, "El caso no está disponible para validación.")
         return redirect("nota_detail", pk=note.pk)
+    key = f"validacion:{note.pk}:{note.actualizado_en.isoformat()}"
+    try:
+        OperacionIdempotente.objects.create(clave=key, tipo="VALIDACION_IA")
+    except IntegrityError:
+        messages.info(request, "La validación ya fue solicitada. Se muestra el resultado existente.")
+        return redirect("validation_detail", pk=note.pk)
     validation = ejecutar_validacion_simulada(note, request.user)
     try:
         generar_explicacion_validacion(validation)
@@ -470,7 +531,29 @@ def validation_run(request, pk):
             "La validación por reglas quedó registrada, pero Gemini no generó "
             f"la explicación: {exc}",
         )
+    OperacionIdempotente.objects.filter(clave=key).update(completada_en=timezone.now(), resultado_id=str(validation.pk))
     return redirect("validation_detail", pk=note.pk)
+
+
+@role_required(2)
+def validation_edit(request, validation_id):
+    validation = get_object_or_404(ValidacionNota, pk=validation_id, eliminado_en__isnull=True)
+    note = _get_note_for_user(request.user, validation.nota_id)
+    form = ValidacionNotaForm(request.POST or None, instance=validation)
+    if request.method == "POST" and form.is_valid():
+        with transaction.atomic():
+            form.save()
+            registrar_evento(note, request.user, "VALIDACION_EDITADA", "El contador actualizó una validación.", {"validacion": str(validation.pk)})
+        messages.success(request, "Validación actualizada con trazabilidad.")
+        return redirect("validation_detail", pk=note.pk)
+    return render(request, "credit_notes/form.html", {"form": form, "titulo": "Editar validación", "nota": note})
+
+
+@role_required(2)
+def validation_delete(request, validation_id):
+    validation = get_object_or_404(ValidacionNota, pk=validation_id, eliminado_en__isnull=True)
+    note = _get_note_for_user(request.user, validation.nota_id)
+    return _delete_view(request, validation, "Eliminar validación", "nota_detail", note)
 
 
 @role_required(2)
@@ -480,7 +563,7 @@ def validation_decide(request, pk):
     if note.estado_flujo != NotaCredito.EstadoFlujo.PENDIENTE_VALIDACION:
         messages.error(request, "El caso ya no admite una decisión de validación.")
         return redirect("nota_detail", pk=note.pk)
-    latest = note.validaciones.first()
+    latest = note.validaciones.filter(eliminado_en__isnull=True).first()
     if not latest:
         messages.error(request, "Ejecuta una validación antes de tomar la decisión.")
         return redirect("validation_detail", pk=note.pk)
@@ -523,7 +606,7 @@ def validation_decide(request, pk):
 
 @role_required(3)
 def negotiation_queue(request):
-    notes = NotaCredito.objects.filter(
+    notes = NotaCredito.objects.filter(eliminado_en__isnull=True).filter(
         estado_flujo__in=[
             NotaCredito.EstadoFlujo.VALIDADA,
             NotaCredito.EstadoFlujo.EN_NEGOCIACION,
@@ -551,6 +634,9 @@ def negotiation_edit(request, pk):
                 order = form.save(commit=False)
                 order.nota = note
                 order.preparado_por = request.user
+                order.eliminado_en = None
+                order.eliminado_por = None
+                order.motivo_eliminacion = ""
                 order.save()
                 note.cliente_comprador = order.comprador
                 note.vendedor = request.user
@@ -577,14 +663,38 @@ def negotiation_edit(request, pk):
 
 
 @role_required(3)
+def negotiation_delete(request, pk):
+    note = _get_note_for_user(request.user, pk)
+    order = get_object_or_404(OrdenNegociacion, nota=note, eliminado_en__isnull=True)
+    response = _delete_view(request, order, "Eliminar negociación", "nota_detail", note)
+    if request.method == "POST" and isinstance(response, HttpResponse) and response.status_code == 302:
+        note.estado_flujo = NotaCredito.EstadoFlujo.VALIDADA
+        note.cliente_comprador = None
+        note.save(update_fields=["estado_flujo", "cliente_comprador", "actualizado_en"])
+    return response
+
+
+@role_required(3)
 @require_POST
 def report_generate(request, pk):
     note = _get_note_for_user(request.user, pk)
+    order = getattr(note, "orden_negociacion", None)
+    if order and order.eliminado_en:
+        order = None
+    version = order.actualizado_en.isoformat() if order else note.actualizado_en.isoformat()
+    key = f"reporte:{note.pk}:{version}"
+    try:
+        OperacionIdempotente.objects.create(clave=key, tipo="REPORTE_IA")
+    except IntegrityError:
+        messages.info(request, "El reporte para esta versión ya fue generado o está en proceso.")
+        return redirect("nota_detail", pk=note.pk)
     try:
         report = generar_reporte_negociacion(note, request.user)
+        OperacionIdempotente.objects.filter(clave=key).update(completada_en=timezone.now(), resultado_id=str(report.pk))
         messages.success(request, "Gemini generó el borrador para revisión.")
         return redirect("report_detail", report_id=report.pk)
     except (ValueError, GeminiServiceError) as exc:
+        OperacionIdempotente.objects.filter(clave=key, completada_en__isnull=True).delete()
         messages.error(request, str(exc))
         return redirect("nota_detail", pk=note.pk)
 
@@ -612,7 +722,7 @@ def report_pdf(request, report_id):
 def approval_requests_create(request, pk):
     note = _get_note_for_user(request.user, pk)
     order = getattr(note, "orden_negociacion", None)
-    if not order:
+    if not order or order.eliminado_en:
         messages.error(request, "Primero crea la orden de negociación.")
         return redirect("nota_detail", pk=note.pk)
     if not note.reportes_ia.exists():
@@ -648,7 +758,7 @@ def approval_requests_create(request, pk):
 def approval_links(request, pk):
     note = _get_note_for_user(request.user, pk)
     order = getattr(note, "orden_negociacion", None)
-    if not order:
+    if not order or order.eliminado_en:
         messages.error(request, "No existe orden de negociación.")
         return redirect("nota_detail", pk=note.pk)
     base_url = settings.PUBLIC_BASE_URL or request.build_absolute_uri("/").rstrip("/")
@@ -668,7 +778,7 @@ def public_approval(request, token):
         SolicitudAprobacion.objects.select_related(
             "orden__nota__cliente_vendedor", "orden__comprador", "cliente"
         ),
-        token=token,
+        token=token, orden__eliminado_en__isnull=True, orden__nota__eliminado_en__isnull=True,
     )
     if approval.estado != SolicitudAprobacion.Estado.PENDIENTE:
         return render(
@@ -680,6 +790,9 @@ def public_approval(request, token):
         form = ConfirmacionPublicaForm(request.POST)
         if form.is_valid():
             with transaction.atomic():
+                approval = SolicitudAprobacion.objects.select_for_update().get(pk=approval.pk)
+                if approval.estado != SolicitudAprobacion.Estado.PENDIENTE:
+                    return redirect("public_approval", token=approval.token)
                 approval.estado = form.cleaned_data["decision"]
                 approval.confirmado_por = form.cleaned_data["nombre"]
                 approval.correo_confirmacion = form.cleaned_data["correo"]

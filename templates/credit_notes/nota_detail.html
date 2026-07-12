@@ -10,6 +10,7 @@
   <div class="d-flex gap-2 flex-wrap">
     <a class="btn btn-outline-secondary" href="{% url 'nota_list' %}"><i class="bi bi-arrow-left me-1"></i>Expedientes</a>
     {% if user.es_recepcionista and nota.estado_flujo == 'BORRADOR' or user.es_recepcionista and nota.estado_flujo == 'CORRECCION_REQUERIDA' %}<a class="btn btn-outline-primary" href="{% url 'nota_edit' nota.pk %}"><i class="bi bi-pencil me-1"></i>Editar</a>{% endif %}
+    {% if user.es_recepcionista or user.is_superuser %}<a class="btn btn-outline-danger" href="{% url 'nota_delete' nota.pk %}"><i class="bi bi-trash3 me-1"></i>Eliminar</a>{% endif %}
   </div>
 </div>
 
@@ -39,7 +40,7 @@
       <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3"><h2 class="h5 mb-0">Documentos de respaldo</h2>{% if user.es_recepcionista or user.es_contador or user.is_superuser %}<a class="btn btn-sm btn-outline-primary" href="{% url 'documento_add' nota.pk %}"><i class="bi bi-plus-lg me-1"></i>Agregar</a>{% endif %}</div>
       <div class="list-group list-group-flush">
       {% for doc in nota.documentos.all %}
-        <div class="list-group-item bg-transparent px-0 d-flex justify-content-between gap-3"><div><strong>{{ doc.nombre }}</strong><div class="small text-muted">{{ doc.get_tipo_documento_display }} · {{ doc.fuente }} · {{ doc.cargado_en|date:'d/m/Y H:i' }}</div></div>{% if doc.archivo_url %}<a class="btn btn-sm btn-outline-secondary" href="{{ doc.archivo_url }}" target="_blank" rel="noopener">Abrir</a>{% endif %}</div>
+        <div class="list-group-item bg-transparent px-0 d-flex justify-content-between gap-3"><div><strong>{{ doc.nombre }}</strong><div class="small text-muted">{{ doc.get_tipo_documento_display }} · {{ doc.fuente }} · {{ doc.cargado_en|date:'d/m/Y H:i' }}</div><code class="document-hash">SHA-256 {{ doc.hash_sha256 }}</code></div>{% if doc.archivo_url %}<a class="btn btn-sm btn-outline-secondary" href="{{ doc.archivo_url }}" target="_blank" rel="noopener">Abrir</a>{% endif %}</div>
       {% empty %}<div class="text-muted text-center py-3">No hay documentos. Para enviar a validación se requiere al menos uno.</div>{% endfor %}
       </div>
     </div>
@@ -56,6 +57,7 @@
     <div class="soft-card p-4 mb-4">
       <div class="d-flex justify-content-between align-items-center mb-3"><h2 class="h5 mb-0">Orden de negociación</h2><span class="status-pill">{{ orden.get_estado_display }}</span></div>
       <div class="row g-3"><div class="col-md-4"><div class="detail-block"><span>Comprador</span><strong>{{ orden.comprador.nombre_razon_social }}</strong></div></div><div class="col-md-4"><div class="detail-block"><span>Valor de venta</span><strong>${{ orden.valor_venta|floatformat:2 }}</strong></div></div><div class="col-md-4"><div class="detail-block"><span>Descuento</span><strong>{{ orden.porcentaje_descuento|floatformat:2 }}%</strong></div></div></div>
+      {% if user.es_vendedor or user.is_superuser %}<div class="d-flex gap-2 justify-content-end mt-3"><a class="btn btn-sm btn-outline-primary" href="{% url 'negotiation_edit' nota.pk %}">Editar</a><a class="btn btn-sm btn-outline-danger" href="{% url 'negotiation_delete' nota.pk %}">Eliminar</a></div>{% endif %}
     </div>
     {% endif %}
 

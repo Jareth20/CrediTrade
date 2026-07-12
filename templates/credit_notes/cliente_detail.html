@@ -3,7 +3,7 @@
 {% block content %}
 <div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-3">
   <div><div class="eyebrow">{{ cliente.get_tipo_relacion_display }}</div><h1 class="h3 mb-1">{{ cliente.nombre_razon_social }}</h1><p class="text-muted mb-0">{{ cliente.ruc_identificacion }}</p></div>
-  <a class="btn btn-outline-secondary" href="{% url 'cliente_list' %}"><i class="bi bi-arrow-left me-1"></i>Clientes</a>
+  <div class="d-flex gap-2"><a class="btn btn-outline-secondary" href="{% url 'cliente_list' %}"><i class="bi bi-arrow-left me-1"></i>Clientes</a>{% if user.es_recepcionista or user.es_vendedor or user.is_superuser %}<a class="btn btn-outline-primary" href="{% url 'cliente_edit' cliente.pk %}">Editar</a><a class="btn btn-outline-danger" href="{% url 'cliente_delete' cliente.pk %}">Eliminar</a>{% endif %}</div>
 </div>
 <div class="row g-4 mt-1">
   <div class="col-lg-5">

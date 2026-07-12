@@ -7,7 +7,7 @@
   --line: rgba(100, 116, 139, .22);
   --primary: #315f86;
   --primary-dark: #244a6a;
-  --soft-shadow: 8px 8px 20px rgba(128, 145, 164, .13), -8px -8px 20px rgba(255, 255, 255, .72);
+  --soft-shadow: 0 8px 24px rgba(30, 58, 85, .07);
   --soft-shadow-small: 4px 4px 12px rgba(128, 145, 164, .11), -4px -4px 12px rgba(255, 255, 255, .65);
 }
 
@@ -41,11 +41,20 @@ body {
 .soft-card {
   background: var(--surface);
   border: 1px solid rgba(255, 255, 255, .75);
-  border-radius: 18px;
+  border-radius: 14px;
   box-shadow: var(--soft-shadow);
 }
 
 .soft-alert { border: 1px solid var(--line); box-shadow: var(--soft-shadow-small); }
+.operation-overlay { position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; padding: 1.25rem; background: rgba(4, 24, 48, .62); backdrop-filter: blur(6px); opacity: 0; visibility: hidden; transition: opacity .18s ease, visibility .18s ease; }
+.operation-overlay.is-visible { opacity: 1; visibility: visible; }
+.operation-panel { width: min(440px, 100%); padding: 2rem; border-radius: 16px; background: #fff; text-align: center; box-shadow: 0 20px 55px rgba(4,24,48,.18); }
+.operation-panel h2 { margin: 1rem 0 .5rem; font-size: 1.15rem; color: var(--primary-dark); }
+.operation-panel p { margin: 0; color: var(--muted); line-height: 1.55; }
+.operation-spinner { width: 42px; height: 42px; margin: auto; border: 3px solid #dbe7f1; border-top-color: var(--primary); border-radius: 50%; animation: operation-spin .8s linear infinite; }
+.operation-locked { overflow: hidden; }
+@keyframes operation-spin { to { transform: rotate(360deg); } }
+.document-hash { display: block; margin-top: .35rem; color: #536b7e; font-size: .7rem; overflow-wrap: anywhere; }
 .page-header { max-width: 1500px; }
 .eyebrow {
   color: var(--primary);
