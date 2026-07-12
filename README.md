@@ -36,7 +36,7 @@ Aplicación desplegada:
 14. [Estructura del proyecto](#14-estructura-del-proyecto)
 15. [Instalación local](#15-instalación-local)
 16. [Variables de entorno](#16-variables-de-entorno)
-17. [Migraciones y datos iniciales](#17-migraciones-y-datos-iniciales)
+17. [Test local con migraciones y datos iniciales](#17-test-local-con-migraciones-y-datos-iniciales)
 18. [Usuarios de demostración](#18-usuarios-de-demostración)
 19. [Pruebas manuales](#19-pruebas-manuales)
 20. [Pruebas automatizadas](#20-pruebas-automatizadas)
@@ -1005,7 +1005,7 @@ Las credenciales reales nunca deben incluirse en el repositorio.
 
 ---
 
-# 17. Migraciones y datos iniciales
+# 17. Test local con migraciones y datos iniciales
 
 ## Windows CMD
 
@@ -1126,7 +1126,7 @@ Se mostraron casos con coincidencia de titular, valor nominal y saldo.
 docs/capturas/posible-duplicado.png
 ```
 
-## Capturas recomendadas
+## Capturas 
 
 ```text
 docs/capturas/
