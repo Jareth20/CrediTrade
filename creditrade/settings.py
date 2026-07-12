@@ -104,15 +104,19 @@ if not DATABASE_URL.startswith(("postgres://", "postgresql://")) and not ALLOW_N
         "DJANGO_ALLOW_NON_POSTGRES_FOR_TESTS=True de forma explícita."
     )
 
+DB_CONN_MAX_AGE = int(os.getenv("DB_CONN_MAX_AGE", "60"))
+
 DATABASES = {
     "default": dj_database_url.parse(
         DATABASE_URL,
-        conn_max_age=0,
+        conn_max_age=DB_CONN_MAX_AGE,
         conn_health_checks=True,
-        ssl_require=DATABASE_URL.startswith(("postgres://", "postgresql://")),
+        ssl_require=DATABASE_URL.startswith(
+            ("postgres://", "postgresql://")
+        ),
     )
 }
-# Neon pooled usa PgBouncer en modo transaccional; evita cursores de servidor.
+
 DATABASES["default"]["DISABLE_SERVER_SIDE_CURSORS"] = True
 
 AUTH_PASSWORD_VALIDATORS = [
