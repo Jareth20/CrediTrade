@@ -16,10 +16,10 @@
 {% if user.is_authenticated %}
 <nav class="navbar navbar-expand-lg navbar-light app-navbar sticky-top">
   <div class="container-fluid px-lg-4">
-    <a class="navbar-brand fw-bold d-flex align-items-center gap-2" href="{% url 'dashboard' %}">
-      <span class="brand-mark"><i class="bi bi-stars"></i></span>
-      CrediTrade
-    </a>
+<a class="navbar-brand d-flex align-items-center gap-2 fw-semibold" href="{% url 'dashboard' %}">
+    <img src="{% static 'img/logo.jpeg' %}" alt="CrediTrade" style="width: 34px; height: 34px; object-fit: cover; border-radius: 8px;">
+    <span>CrediTrade</span>
+</a>
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav" aria-controls="mainNav" aria-expanded="false" aria-label="Abrir navegación">
       <span class="navbar-toggler-icon"></span>
     </button>
