@@ -1,20 +1,34 @@
 __pycache__/
 *.py[cod]
 *.sqlite3
-.env
-.env.example
-.env.local
-.venv/
-venv/
-staticfiles/
-media/
-.pytest_cache/
-.coverage
-.DS_Store
-.vercel/
-configurar_local.cmd
-configurar_vercel.cmd
-configurar_vercel.ps1
-iniciar_local.cmd
-migrar_neon.cmd
-probar_integraciones.cmd
+
+# Variables privadas
+/.env
+/.env.example
+/.env.local
+
+# Entornos virtuales
+/.venv/
+/venv/
+
+# Archivos generados
+/staticfiles/
+/media/
+/.pytest_cache/
+/.coverage
+/.DS_Store
+/.vercel/
+
+# Documentos solo locales
+/CHANGELOG.md
+/SECURITY_NOTICE.md
+/docs/DESPLIEGUE_VERCEL.md
+/docs/ESCALABILIDAD.md
+
+# Scripts solo locales
+/configurar_local.cmd
+/configurar_vercel.cmd
+/configurar_vercel.ps1
+/iniciar_local.cmd
+/migrar_neon.cmd
+/probar_integraciones.cmd
