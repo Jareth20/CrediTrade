@@ -11,14 +11,90 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
   <link rel="stylesheet" href="{% static 'css/styles.css' %}">
   {% block extra_head %}{% endblock %}
+  <style>
+    :root {
+        --creditrade-navy: #05285F;
+        --creditrade-blue: #025EF2;
+    }
+
+    .brand-link {
+        text-decoration: none;
+    }
+
+    .brand-logo {
+        width: 42px;
+        height: 42px;
+        object-fit: contain;
+        border-radius: 10px;
+        background-color: #ffffff;
+    }
+
+    .brand-name {
+        font-size: 1.55rem;
+        font-weight: 800;
+        letter-spacing: -0.5px;
+        line-height: 1;
+    }
+
+    .brand-credit {
+        color: var(--creditrade-navy);
+    }
+
+    .brand-trade {
+        color: var(--creditrade-blue);
+    }
+
+    .navbar .nav-link {
+        color: var(--creditrade-navy);
+        font-weight: 600;
+        transition:
+            color 0.18s ease,
+            background-color 0.18s ease;
+    }
+
+    .navbar .nav-link:hover,
+    .navbar .nav-link:focus,
+    .navbar .nav-link.active {
+        color: var(--creditrade-blue);
+    }
+
+    .navbar .dropdown-toggle {
+        color: var(--creditrade-navy);
+    }
+
+    .navbar .dropdown-toggle:hover,
+    .navbar .dropdown-toggle:focus {
+        color: var(--creditrade-blue);
+    }
+
+    @media (max-width: 576px) {
+        .brand-logo {
+            width: 36px;
+            height: 36px;
+        }
+
+        .brand-name {
+            font-size: 1.3rem;
+        }
+    }
+</style>
 </head>
 <body>
 {% if user.is_authenticated %}
 <nav class="navbar navbar-expand-lg navbar-light app-navbar sticky-top">
   <div class="container-fluid px-lg-4">
-<a class="navbar-brand d-flex align-items-center gap-2 fw-semibold" href="{% url 'dashboard' %}">
-    <img src="{% static 'img/logo.jpeg' %}" alt="CrediTrade" style="width: 34px; height: 34px; object-fit: cover; border-radius: 8px;">
-    <span>CrediTrade</span>
+<a class="navbar-brand brand-link d-flex align-items-center gap-2"
+   href="{% url 'dashboard' %}">
+
+    <img
+        src="{% static 'img/creditrade-logo-v2.jpeg' %}?v=2"
+        alt="Logo de CrediTrade"
+        class="brand-logo"
+    >
+
+    <span class="brand-name">
+        <span class="brand-credit">Credi</span><span class="brand-trade">Trade</span>
+    </span>
 </a>
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav" aria-controls="mainNav" aria-expanded="false" aria-label="Abrir navegación">
       <span class="navbar-toggler-icon"></span>
