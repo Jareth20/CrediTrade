@@ -13,6 +13,7 @@ APP_NAME = "CrediTrade"
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "")
 DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() in {"1", "true", "yes", "on"}
+DEMO_LOGIN_PREFILL = os.getenv("DEMO_LOGIN_PREFILL", "True").lower() in {"1", "true", "yes", "on"}
 
 if not SECRET_KEY:
     raise ImproperlyConfigured(

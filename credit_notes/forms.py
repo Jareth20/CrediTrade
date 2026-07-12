@@ -63,6 +63,16 @@ class ClienteForm(BootstrapFormMixin, forms.ModelForm):
             instance.save()
         return instance
 
+    def clean_telefono(self):
+        value = (self.cleaned_data.get("telefono") or "").strip()
+        compact = value.replace("+", "", 1).replace(" ", "").replace("-", "")
+        if value and not compact.isdigit():
+            raise forms.ValidationError("Ingrese un teléfono válido; solo se permiten dígitos, +, espacios y guiones.")
+        digits = "".join(char for char in value if char.isdigit())
+        if value and not 7 <= len(digits) <= 15:
+            raise forms.ValidationError("El teléfono debe contener entre 7 y 15 dígitos.")
+        return value
+
 
 class NotaCreditoForm(BootstrapFormMixin, forms.ModelForm):
     class Meta:
@@ -184,6 +194,7 @@ class OrdenNegociacionForm(BootstrapFormMixin, forms.ModelForm):
             if not self.instance.pk:
                 self.fields["valor_venta"].initial = nota.saldo_disponible
         self.apply_bootstrap()
+        self.fields["terminos"].required = True
 
     def clean_valor_venta(self):
         value = self.cleaned_data["valor_venta"]
@@ -193,6 +204,15 @@ class OrdenNegociacionForm(BootstrapFormMixin, forms.ModelForm):
             if value > self.nota.saldo_disponible:
                 raise forms.ValidationError("El valor supera el saldo disponible.")
         return value
+
+    def clean(self):
+        cleaned = super().clean()
+        proposal, expiry = cleaned.get("fecha_propuesta"), cleaned.get("vigencia_hasta")
+        if proposal and expiry and expiry < proposal:
+            self.add_error("vigencia_hasta", "La vigencia no puede ser anterior a la fecha de propuesta.")
+        if len((cleaned.get("terminos") or "").strip()) < 20:
+            self.add_error("terminos", "Describa los términos del contrato con al menos 20 caracteres.")
+        return cleaned
 
 
 class ConfirmacionPublicaForm(BootstrapFormMixin, forms.Form):
@@ -214,3 +234,9 @@ class ConfirmacionPublicaForm(BootstrapFormMixin, forms.Form):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.apply_bootstrap()
+
+    def clean_nombre(self):
+        value = self.cleaned_data["nombre"].strip()
+        if len(value) < 3 or not any(char.isalpha() for char in value):
+            raise forms.ValidationError("Ingrese el nombre completo de quien confirma.")
+        return value

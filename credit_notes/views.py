@@ -627,6 +627,9 @@ def negotiation_edit(request, pk):
         messages.error(request, "El caso no está disponible para preparar negociación.")
         return redirect("nota_detail", pk=note.pk)
     order = getattr(note, "orden_negociacion", None)
+    previous_contract = None
+    if order:
+        previous_contract = (str(order.comprador_id), str(order.valor_venta), order.fecha_propuesta, order.vigencia_hasta, order.terminos, order.observaciones)
     if request.method == "POST":
         form = OrdenNegociacionForm(request.POST, instance=order, nota=note)
         if form.is_valid():
@@ -638,6 +641,14 @@ def negotiation_edit(request, pk):
                 order.eliminado_por = None
                 order.motivo_eliminacion = ""
                 order.save()
+                current_contract = (str(order.comprador_id), str(order.valor_venta), order.fecha_propuesta, order.vigencia_hasta, order.terminos, order.observaciones)
+                if previous_contract is not None and previous_contract != current_contract and order.solicitudes.exists():
+                    old_version = order.version
+                    order.solicitudes.filter(version_contrato=old_version, estado=SolicitudAprobacion.Estado.PENDIENTE).update(estado=SolicitudAprobacion.Estado.EXPIRADA)
+                    order.version += 1
+                    order.estado = OrdenNegociacion.Estado.BORRADOR
+                    order.save(update_fields=["version", "estado", "actualizado_en"])
+                    registrar_evento(note, request.user, "CONTRATO_REAJUSTADO", f"Se creó la versión {order.version}; los enlaces anteriores quedaron invalidados.", {"version_anterior": old_version, "version_nueva": order.version})
                 note.cliente_comprador = order.comprador
                 note.vendedor = request.user
                 note.estado_flujo = NotaCredito.EstadoFlujo.EN_NEGOCIACION
@@ -729,15 +740,18 @@ def approval_requests_create(request, pk):
         messages.error(request, "Genera y revisa al menos un reporte antes de solicitar confirmaciones.")
         return redirect("nota_detail", pk=note.pk)
     with transaction.atomic():
+        snapshot = {"version": order.version, "numero_titulo": note.numero_titulo, "vendedor": note.cliente_vendedor.nombre_razon_social, "comprador": order.comprador.nombre_razon_social, "valor_venta": str(order.valor_venta), "porcentaje_descuento": str(order.porcentaje_descuento), "fecha_propuesta": order.fecha_propuesta.isoformat(), "vigencia_hasta": order.vigencia_hasta.isoformat() if order.vigencia_hasta else "", "terminos": order.terminos, "observaciones": order.observaciones}
         seller_request, _ = SolicitudAprobacion.objects.get_or_create(
             orden=order,
             parte=SolicitudAprobacion.Parte.VENDEDOR,
-            defaults={"cliente": note.cliente_vendedor},
+            version_contrato=order.version,
+            defaults={"cliente": note.cliente_vendedor, "contrato_snapshot": snapshot},
         )
         buyer_request, _ = SolicitudAprobacion.objects.get_or_create(
             orden=order,
             parte=SolicitudAprobacion.Parte.COMPRADOR,
-            defaults={"cliente": order.comprador},
+            version_contrato=order.version,
+            defaults={"cliente": order.comprador, "contrato_snapshot": snapshot},
         )
         order.estado = OrdenNegociacion.Estado.ENVIADA_CONFIRMACION
         order.save(update_fields=["estado", "actualizado_en"])
@@ -748,7 +762,7 @@ def approval_requests_create(request, pk):
             request.user,
             "CONFIRMACIONES_SOLICITADAS",
             "Se generaron enlaces únicos para vendedor y comprador.",
-            {"solicitudes_generadas": 2},
+            {"solicitudes_generadas": 2, "version_contrato": order.version},
         )
     messages.success(request, "Enlaces de confirmación generados.")
     return redirect("approval_links", pk=note.pk)
@@ -763,7 +777,7 @@ def approval_links(request, pk):
         return redirect("nota_detail", pk=note.pk)
     base_url = settings.PUBLIC_BASE_URL or request.build_absolute_uri("/").rstrip("/")
     requests_data = []
-    for approval in order.solicitudes.select_related("cliente"):
+    for approval in order.solicitudes.select_related("cliente").order_by("-version_contrato", "parte"):
         url = f"{base_url}{reverse('public_approval', kwargs={'token': approval.token})}"
         requests_data.append((approval, url))
     return render(
@@ -807,7 +821,7 @@ def public_approval(request, token):
                     f"La parte {approval.get_parte_display()} registró su decisión: {approval.get_estado_display()}.",
                     {"solicitud": str(approval.id)},
                 )
-                all_requests = list(approval.orden.solicitudes.all())
+                all_requests = list(approval.orden.solicitudes.filter(version_contrato=approval.version_contrato))
                 if all_requests and all(
                     item.estado == SolicitudAprobacion.Estado.APROBADA
                     for item in all_requests
@@ -823,8 +837,10 @@ def public_approval(request, token):
                         "Ambas partes confirmaron. El caso queda listo para solicitar aprobación regulada.",
                     )
                 elif approval.estado == SolicitudAprobacion.Estado.RECHAZADA:
+                    approval.orden.solicitudes.filter(version_contrato=approval.version_contrato, estado=SolicitudAprobacion.Estado.PENDIENTE).exclude(pk=approval.pk).update(estado=SolicitudAprobacion.Estado.EXPIRADA)
                     note.estado_flujo = NotaCredito.EstadoFlujo.EN_NEGOCIACION
                     note.save(update_fields=["estado_flujo", "actualizado_en"])
+                    registrar_evento(note, None, "NEGOCIACION_FALLIDA", f"La versión {approval.version_contrato} fue rechazada por {approval.get_parte_display()} y queda disponible para reajuste.", {"version": approval.version_contrato, "parte": approval.parte, "comentario": approval.comentario})
             return redirect("public_approval", token=approval.token)
     else:
         form = ConfirmacionPublicaForm()

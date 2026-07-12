@@ -509,6 +509,7 @@ class OrdenNegociacion(models.Model):
         related_name="ordenes_preparadas",
     )
     creado_en = models.DateTimeField(auto_now_add=True)
+    version = models.PositiveIntegerField(default=1)
     actualizado_en = models.DateTimeField(auto_now=True)
     eliminado_en = models.DateTimeField(null=True, blank=True, db_index=True)
     eliminado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="negociaciones_eliminadas")
@@ -585,6 +586,7 @@ class SolicitudAprobacion(models.Model):
         PENDIENTE = "PENDIENTE", "Pendiente"
         APROBADA = "APROBADA", "Aprobada"
         RECHAZADA = "RECHAZADA", "Rechazada"
+        EXPIRADA = "EXPIRADA", "Reemplazada por una nueva versión"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
@@ -603,11 +605,13 @@ class SolicitudAprobacion(models.Model):
     comentario = models.TextField(blank=True)
     confirmado_en = models.DateTimeField(null=True, blank=True)
     creado_en = models.DateTimeField(auto_now_add=True)
+    version_contrato = models.PositiveIntegerField(default=1)
+    contrato_snapshot = models.JSONField(default=dict, blank=True)
 
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=["orden", "parte"], name="unique_approval_party_per_order"
+                fields=["orden", "parte", "version_contrato"], name="unique_approval_party_per_order_version"
             )
         ]
 
