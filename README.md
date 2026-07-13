@@ -1304,11 +1304,13 @@ El objetivo es demostrar el flujo funcional de extremo a extremo.
 
 ---
 
-# 25. Autores
+# 👥 25. Autores
 
-**Jareth Rojas**
-**Alejandro Verdesoto**
-**Cristina Villacis**
+| Nombre | Descripción |
+| :--- | :--- |
+| **Cristina Villacís** | ` Ingeniería en Ciencias de la Computación ` |
+| **Jareth Rojas** | `Ingeniería en Ciencia de Datos e IA ` |
+| **Alejandro Verdesoto** | `Ingeniería en Ciencia de Datos e IA `|
 
 Proyecto desarrollado como MVP para el Track 4 del Hackathon de Agentic Scale.
 
