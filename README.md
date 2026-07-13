@@ -1053,7 +1053,6 @@ http://127.0.0.1:8000/
 | `contador` | `OperadorDemo123!` | Operador 2 |
 | `vendedor` | `OperadorDemo123!` | Operador 3 |
 | `operador_total` | `OperadorDemo123!` | Operadores 1, 2 y 3 |
-| `admin` | `AdminDemo123!` | Administrador |
 
 > Estas contraseñas deben cambiarse antes de una demostración pública o uso en producción.
 
