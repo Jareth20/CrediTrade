@@ -6,7 +6,7 @@ CrediTrade es un MVP web desarrollado en Django para agilizar el ingreso, revisi
 
 La plataforma centraliza los expedientes, distribuye las responsabilidades entre diferentes operadores y utiliza inteligencia artificial para reutilizar antecedentes, proponer datos, explicar resultados de validación y generar borradores de negociación.
 
-> La inteligencia artificial funciona como apoyo para el operador. Ninguna sugerencia, aprobación, liquidación, transferencia o endoso se ejecuta automáticamente.
+> La inteligencia artificial funciona como apoyo para los operadores. Ninguna sugerencia, aprobación, liquidación, transferencia o endoso se ejecuta automáticamente; estas decisiones y acciones las decide finalmente cada operador.
 
 ---
 
