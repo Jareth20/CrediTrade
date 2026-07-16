@@ -21,6 +21,7 @@ from .ai_services import (
     generar_sugerencias_nota,
 )
 from .decorators import role_required
+from .agents import iniciar_analisis, registrar_decision
 from .forms import (
     ClienteForm,
     ConfirmacionPublicaForm,
@@ -28,8 +29,8 @@ from .forms import (
     DocumentoRespaldoForm,
     NotaCreditoForm,
     OrdenNegociacionForm,
-    ValidacionNotaForm,
     DeleteReasonForm,
+    DecisionAgenteForm,
 )
 from .models import (
     Cliente,
@@ -42,6 +43,7 @@ from .models import (
     SugerenciaIA,
     ValidacionNota,
     OperacionIdempotente,
+    EjecucionAgente,
 )
 from .pdf_reports import build_negotiation_pdf
 from .services import (
@@ -88,7 +90,21 @@ def dashboard(request):
         "pendientes_confirmacion": base.filter(
             estado_flujo=NotaCredito.EstadoFlujo.PENDIENTE_CONFIRMACIONES
         ).count(),
+        "negociaciones_activas": base.filter(
+            estado_flujo__in=[
+                NotaCredito.EstadoFlujo.EN_NEGOCIACION,
+                NotaCredito.EstadoFlujo.PENDIENTE_CONFIRMACIONES,
+            ]
+        ).count(),
+        "cerradas": base.filter(
+            estado_flujo=NotaCredito.EstadoFlujo.CERRADA_DEMO
+        ).count(),
         "recientes": base.select_related("cliente_vendedor")[:8],
+        "analisis_recientes": EjecucionAgente.objects.filter(operador=user)
+        .select_related("nota")[:5],
+        "analisis_pendientes": EjecucionAgente.objects.filter(
+            operador=user, estado=EjecucionAgente.Estado.ESPERANDO_HUMANO
+        ).count(),
     }
     if user.is_superuser:
         context["mis_casos"] = base.count()
@@ -247,6 +263,11 @@ def nota_detail(request, pk):
     order = getattr(note, "orden_negociacion", None)
     if order and order.eliminado_en:
         order = None
+    execution = (
+        note.ejecuciones_agentes.select_related("operador")
+        .prefetch_related("eventos")
+        .first()
+    )
     return render(
         request,
         "credit_notes/nota_detail.html",
@@ -257,8 +278,59 @@ def nota_detail(request, pk):
             "orden": order,
             "eventos": note.eventos.select_related("operador")[:30],
             "reportes": note.reportes_ia.all()[:10],
+            "ejecucion_agente": execution,
+            "estado_agente": execution.estado_compartido if execution else {},
+            "decision_agente_form": (
+                DecisionAgenteForm()
+                if execution
+                and execution.estado == EjecucionAgente.Estado.ESPERANDO_HUMANO
+                else None
+            ),
         },
     )
+
+
+@login_required
+@require_POST
+def agent_analysis_start(request, pk):
+    note = _get_note_for_user(request.user, pk)
+    execution, created = iniciar_analisis(note, request.user)
+    if not created:
+        messages.info(request, "Ya existe un analisis activo o esperando tu revision.")
+    elif execution.estado == EjecucionAgente.Estado.ERROR_CONTROLADO:
+        messages.error(request, execution.error_amigable)
+    else:
+        messages.success(
+            request,
+            "El centro de analisis preparo el expediente y espera tu revision.",
+        )
+    return redirect("nota_detail", pk=note.pk)
+
+
+@login_required
+@require_POST
+def agent_analysis_decide(request, execution_id):
+    execution = get_object_or_404(
+        EjecucionAgente.objects.select_related("nota"), pk=execution_id
+    )
+    note = _get_note_for_user(request.user, execution.nota_id)
+    form = DecisionAgenteForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "Selecciona una decision valida.")
+        return redirect("nota_detail", pk=note.pk)
+    try:
+        registrar_decision(
+            execution,
+            request.user,
+            form.cleaned_data["decision"],
+            form.cleaned_data["observacion"],
+        )
+        messages.success(request, "Decision humana registrada con trazabilidad.")
+    except PermissionError:
+        raise Http404
+    except ValueError as exc:
+        messages.info(request, str(exc))
+    return redirect("nota_detail", pk=note.pk)
 
 
 @role_required(1, 2)
@@ -371,9 +443,9 @@ def ai_generate_suggestions(request, pk):
         return redirect("suggestion_review", pk=note.pk)
     try:
         created = generar_sugerencias_nota(note, request.user)
-    except GeminiServiceError as exc:
+    except GeminiServiceError:
         OperacionIdempotente.objects.filter(clave=key, completada_en__isnull=True).delete()
-        messages.error(request, str(exc))
+        messages.error(request, "No fue posible completar el analisis en este momento. La informacion registrada permanece guardada. Puedes intentar nuevamente.")
         return redirect("nota_detail", pk=note.pk)
     OperacionIdempotente.objects.filter(clave=key).update(completada_en=timezone.now())
 
@@ -525,35 +597,53 @@ def validation_run(request, pk):
         messages.success(
             request, "Validación comparativa ejecutada y explicada por Gemini."
         )
-    except GeminiServiceError as exc:
+    except GeminiServiceError:
         messages.warning(
             request,
-            "La validación por reglas quedó registrada, pero Gemini no generó "
-            f"la explicación: {exc}",
+            "La validación por reglas quedó registrada, pero la explicación asistida no estuvo disponible. Puedes reintentar.",
         )
     OperacionIdempotente.objects.filter(clave=key).update(completada_en=timezone.now(), resultado_id=str(validation.pk))
     return redirect("validation_detail", pk=note.pk)
 
 
 @role_required(2)
-def validation_edit(request, validation_id):
-    validation = get_object_or_404(ValidacionNota, pk=validation_id, eliminado_en__isnull=True)
-    note = _get_note_for_user(request.user, validation.nota_id)
-    form = ValidacionNotaForm(request.POST or None, instance=validation)
-    if request.method == "POST" and form.is_valid():
-        with transaction.atomic():
-            form.save()
-            registrar_evento(note, request.user, "VALIDACION_EDITADA", "El contador actualizó una validación.", {"validacion": str(validation.pk)})
-        messages.success(request, "Validación actualizada con trazabilidad.")
+@require_POST
+def validation_explanation_retry(request, pk):
+    note = _get_note_for_user(request.user, pk)
+    validation = note.validaciones.filter(eliminado_en__isnull=True).first()
+    if not validation:
+        messages.error(request, "Primero ejecuta la validación por reglas.")
         return redirect("validation_detail", pk=note.pk)
-    return render(request, "credit_notes/form.html", {"form": form, "titulo": "Editar validación", "nota": note})
-
-
-@role_required(2)
-def validation_delete(request, validation_id):
-    validation = get_object_or_404(ValidacionNota, pk=validation_id, eliminado_en__isnull=True)
-    note = _get_note_for_user(request.user, validation.nota_id)
-    return _delete_view(request, validation, "Eliminar validación", "nota_detail", note)
+    key = f"explicacion-validacion:{validation.pk}"
+    try:
+        OperacionIdempotente.objects.create(
+            clave=key, tipo="EXPLICACION_VALIDACION_IA"
+        )
+    except IntegrityError:
+        messages.info(request, "La explicación ya fue generada o continúa en proceso.")
+        return redirect("validation_detail", pk=note.pk)
+    try:
+        generar_explicacion_validacion(validation)
+        OperacionIdempotente.objects.filter(clave=key).update(
+            completada_en=timezone.now(), resultado_id=str(validation.pk)
+        )
+        registrar_evento(
+            note,
+            request.user,
+            "EXPLICACION_VALIDACION_GENERADA",
+            "Se generó una explicación asistida sobre las reglas ya guardadas.",
+            {"validacion": str(validation.pk)},
+        )
+        messages.success(request, "Explicación asistida generada para revisión.")
+    except GeminiServiceError:
+        OperacionIdempotente.objects.filter(
+            clave=key, completada_en__isnull=True
+        ).delete()
+        messages.warning(
+            request,
+            "La explicación asistida sigue sin estar disponible. La validación por reglas permanece guardada.",
+        )
+    return redirect("validation_detail", pk=note.pk)
 
 
 @role_required(2)
@@ -704,9 +794,9 @@ def report_generate(request, pk):
         OperacionIdempotente.objects.filter(clave=key).update(completada_en=timezone.now(), resultado_id=str(report.pk))
         messages.success(request, "Gemini generó el borrador para revisión.")
         return redirect("report_detail", report_id=report.pk)
-    except (ValueError, GeminiServiceError) as exc:
+    except (ValueError, GeminiServiceError):
         OperacionIdempotente.objects.filter(clave=key, completada_en__isnull=True).delete()
-        messages.error(request, str(exc))
+        messages.error(request, "No fue posible generar el borrador en este momento. Los datos permanecen guardados; puedes reintentar.")
         return redirect("nota_detail", pk=note.pk)
 
 

@@ -145,6 +145,12 @@ LOGOUT_REDIRECT_URL = "accounts:login"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash").strip()
 GEMINI_TIMEOUT_MS = int(os.getenv("GEMINI_TIMEOUT_MS", "60000"))
+GEMINI_EMBEDDING_MODEL = os.getenv(
+    "GEMINI_EMBEDDING_MODEL", "gemini-embedding-001"
+).strip()
+RAG_EMBEDDING_DIMENSIONS = int(os.getenv("RAG_EMBEDDING_DIMENSIONS", "768"))
+RAG_TOP_K = int(os.getenv("RAG_TOP_K", "6"))
+AGENT_MAX_RETRIES = int(os.getenv("AGENT_MAX_RETRIES", "1"))
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
 
 # Límites conservadores para un MVP serverless.

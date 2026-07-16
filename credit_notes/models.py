@@ -7,6 +7,7 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator, RegexValidator
 from django.db import models
 from django.utils import timezone
+from pgvector.django import VectorField
 
 
 identificacion_validator = RegexValidator(
@@ -651,3 +652,142 @@ class OperacionIdempotente(models.Model):
     creada_en = models.DateTimeField(auto_now_add=True)
     completada_en = models.DateTimeField(null=True, blank=True)
     resultado_id = models.CharField(max_length=80, blank=True)
+
+
+class EjecucionAgente(models.Model):
+    """Checkpoint persistente del grafo; no sustituye el log de auditoria."""
+
+    class Estado(models.TextChoices):
+        EJECUTANDO = "EJECUTANDO", "Ejecutando"
+        ESPERANDO_HUMANO = "ESPERANDO_HUMANO", "Esperando revision humana"
+        COMPLETADA = "COMPLETADA", "Completada"
+        ERROR_CONTROLADO = "ERROR_CONTROLADO", "Error controlado"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    nota = models.ForeignKey(
+        NotaCredito, on_delete=models.CASCADE, related_name="ejecuciones_agentes"
+    )
+    operador = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="ejecuciones_agentes",
+    )
+    estado = models.CharField(
+        max_length=24, choices=Estado.choices, default=Estado.EJECUTANDO, db_index=True
+    )
+    etapa = models.CharField(max_length=80, default="supervisor")
+    nodo_pendiente = models.CharField(max_length=80, blank=True)
+    estado_compartido = models.JSONField(default=dict)
+    decisiones_humanas = models.JSONField(default=list, blank=True)
+    error_amigable = models.CharField(max_length=300, blank=True)
+    iniciada_en = models.DateTimeField(auto_now_add=True, db_index=True)
+    actualizada_en = models.DateTimeField(auto_now=True)
+    finalizada_en = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-iniciada_en"]
+        indexes = [
+            models.Index(fields=["nota", "estado", "iniciada_en"], name="credit_note_nota_id_335f05_idx"),
+            models.Index(fields=["operador", "estado"], name="credit_note_operado_b1316a_idx"),
+        ]
+
+    @property
+    def etapa_display(self):
+        return (self.etapa or "").replace("_", " ").capitalize()
+
+    @property
+    def nodo_pendiente_display(self):
+        return (self.nodo_pendiente or "").replace("_", " ").capitalize()
+
+
+class EventoAgente(models.Model):
+    class Estado(models.TextChoices):
+        INICIADO = "INICIADO", "Iniciado"
+        COMPLETADO = "COMPLETADO", "Completado"
+        ERROR = "ERROR", "Error controlado"
+
+    ejecucion = models.ForeignKey(
+        EjecucionAgente, on_delete=models.CASCADE, related_name="eventos"
+    )
+    agente = models.CharField(max_length=80, db_index=True)
+    estado = models.CharField(max_length=12, choices=Estado.choices)
+    resumen = models.CharField(max_length=300)
+    metadatos = models.JSONField(default=dict, blank=True)
+    creado_en = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["creado_en"]
+        indexes = [models.Index(fields=["ejecucion", "creado_en"], name="credit_note_ejecuci_5f88c1_idx")]
+
+    @property
+    def agente_display(self):
+        return (self.agente or "").replace("_", " ").capitalize()
+
+
+class MemoriaAgente(models.Model):
+    """Memoria durable, minima y aislada por operador/entidad."""
+
+    class Ambito(models.TextChoices):
+        NOTA = "NOTA", "Nota"
+        CLIENTE = "CLIENTE", "Cliente"
+        OPERADOR = "OPERADOR", "Operador"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    operador = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="memorias_agente"
+    )
+    nota = models.ForeignKey(
+        NotaCredito, on_delete=models.CASCADE, null=True, blank=True, related_name="memorias_agente"
+    )
+    cliente = models.ForeignKey(
+        Cliente, on_delete=models.CASCADE, null=True, blank=True, related_name="memorias_agente"
+    )
+    ambito = models.CharField(max_length=12, choices=Ambito.choices)
+    categoria = models.CharField(max_length=80, db_index=True)
+    contenido = models.JSONField(default=dict)
+    vigente = models.BooleanField(default=True, db_index=True)
+    creada_en = models.DateTimeField(auto_now_add=True)
+    actualizada_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["operador", "ambito", "vigente"], name="credit_note_operado_a29c75_idx"),
+            models.Index(fields=["nota", "categoria"], name="credit_note_nota_id_029fa7_idx"),
+            models.Index(fields=["cliente", "categoria"], name="credit_note_cliente_62c49a_idx"),
+        ]
+
+
+class FragmentoDocumento(models.Model):
+    """Unidad recuperable del vector store interno en PostgreSQL/pgvector."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    documento = models.ForeignKey(
+        DocumentoRespaldo, on_delete=models.CASCADE, related_name="fragmentos"
+    )
+    nota = models.ForeignKey(
+        NotaCredito, on_delete=models.CASCADE, related_name="fragmentos_rag"
+    )
+    cliente = models.ForeignKey(
+        Cliente, on_delete=models.PROTECT, related_name="fragmentos_rag"
+    )
+    indice = models.PositiveIntegerField()
+    seccion = models.CharField(max_length=120, blank=True)
+    texto = models.TextField()
+    texto_hash = models.CharField(max_length=64, db_index=True)
+    fuente = models.CharField(max_length=200)
+    tipo_documento = models.CharField(max_length=30)
+    embedding = VectorField(dimensions=768)
+    modelo_embedding = models.CharField(max_length=100)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["documento", "indice"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["documento", "texto_hash"], name="unique_chunk_hash_per_document"
+            )
+        ]
+        indexes = [
+            models.Index(fields=["nota", "tipo_documento"], name="credit_note_nota_id_b775ae_idx"),
+            models.Index(fields=["cliente", "creado_en"], name="credit_note_cliente_a47fde_idx"),
+        ]

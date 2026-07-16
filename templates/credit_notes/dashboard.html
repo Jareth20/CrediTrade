@@ -22,11 +22,20 @@
 </div>
 
 <div class="row g-3 mt-2">
-  <div class="col-6 col-xl"><div class="metric-card soft-card"><span>Expedientes</span><strong>{{ total_notas }}</strong></div></div>
-  <div class="col-6 col-xl"><div class="metric-card soft-card"><span>Clientes</span><strong>{{ total_clientes }}</strong></div></div>
-  <div class="col-6 col-xl"><div class="metric-card soft-card"><span>Por validar</span><strong>{{ pendientes_validacion }}</strong></div></div>
-  <div class="col-6 col-xl"><div class="metric-card soft-card"><span>Por negociar</span><strong>{{ listas_negociacion }}</strong></div></div>
-  <div class="col-6 col-xl"><div class="metric-card soft-card"><span>Confirmaciones</span><strong>{{ pendientes_confirmacion }}</strong></div></div>
+  <div class="col-6 col-lg-4 col-xxl"><a class="metric-card soft-card" href="{% url 'nota_list' %}"><span>Expedientes</span><strong>{{ total_notas }}</strong><small>Ver todos <i class="bi bi-arrow-right"></i></small></a></div>
+  <div class="col-6 col-lg-4 col-xxl"><a class="metric-card soft-card" href="{% url 'cliente_list' %}"><span>Clientes</span><strong>{{ total_clientes }}</strong><small>Ver clientes <i class="bi bi-arrow-right"></i></small></a></div>
+  {% if user.es_contador or user.is_superuser %}<div class="col-6 col-lg-4 col-xxl"><a class="metric-card soft-card" href="{% url 'validation_queue' %}"><span>Por validar</span><strong>{{ pendientes_validacion }}</strong><small>Abrir cola <i class="bi bi-arrow-right"></i></small></a></div>{% endif %}
+  {% if user.es_vendedor or user.is_superuser %}<div class="col-6 col-lg-4 col-xxl"><a class="metric-card soft-card" href="{% url 'nota_list' %}?estado=VALIDADA"><span>Listas para negociar</span><strong>{{ listas_negociacion }}</strong><small>Revisar <i class="bi bi-arrow-right"></i></small></a></div>
+  <div class="col-6 col-lg-4 col-xxl"><a class="metric-card soft-card" href="{% url 'negotiation_queue' %}"><span>Negociaciones activas</span><strong>{{ negociaciones_activas }}</strong><small>Abrir módulo <i class="bi bi-arrow-right"></i></small></a></div>{% endif %}
+  <div class="col-6 col-lg-4 col-xxl"><a class="metric-card soft-card" href="{% url 'nota_list' %}?estado=CERRADA_DEMO"><span>Cerradas</span><strong>{{ cerradas }}</strong><small>Ver historial <i class="bi bi-arrow-right"></i></small></a></div>
+</div>
+
+<div class="row g-4 mt-1">
+  <div class="col-lg-8"><div class="soft-card p-4 h-100">
+    <div class="d-flex justify-content-between align-items-center mb-3"><h2 class="h5 mb-0">Analisis agenticos recientes</h2><span class="status-pill status-warning">{{ analisis_pendientes }} esperando revision</span></div>
+    <div class="agent-run-list">{% for run in analisis_recientes %}<a href="{% url 'nota_detail' run.nota_id %}" class="agent-run"><span class="agent-icon"><i class="bi bi-diagram-3"></i></span><span><strong>{{ run.nota.numero_titulo }}</strong><small>{{ run.etapa }} · {{ run.actualizada_en|date:'d/m/Y H:i' }}</small></span><span class="status-pill ms-auto">{{ run.get_estado_display }}</span></a>{% empty %}<div class="empty-evidence"><i class="bi bi-stars"></i><div><strong>Aun no hay analisis</strong><p>Abre un expediente y ejecuta el centro de analisis asistido.</p></div></div>{% endfor %}</div>
+  </div></div>
+  <div class="col-lg-4"><div class="soft-card p-4 h-100"><h2 class="h5">Control humano</h2><p class="text-muted">Cada recomendacion se detiene antes de avanzar y conserva responsable, fecha, motivo y evidencia.</p><a href="{% url 'nota_list' %}" class="btn btn-outline-primary w-100">Revisar expedientes</a></div></div>
 </div>
 
 <div class="row g-4 mt-1">

@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from decimal import Decimal
 from typing import List, Literal
 
@@ -27,6 +28,18 @@ ALLOWED_SUGGESTION_FIELDS = {
 
 class GeminiServiceError(RuntimeError):
     """Error controlado al consultar o validar una respuesta de Gemini."""
+
+
+def _rate_limit_delay(exc):
+    """Devuelve una espera corta para 429; None para errores no reintentables."""
+    detail = str(exc).lower()
+    if "429" not in detail and "too_many_requests" not in detail:
+        return None
+    match = re.search(r"retry in\s+([0-9]+(?:\.[0-9]+)?)s", detail)
+    requested = float(match.group(1)) if match else 2.0
+    if requested > 10.0:
+        return None
+    return max(requested, 1.0)
 
 
 def _call_gemini(prompt, schema_model):
@@ -60,15 +73,29 @@ def _call_gemini(prompt, schema_model):
             ),
         )
 
-        interaction = client.interactions.create(
-            model=settings.GEMINI_MODEL,
-            input=prompt,
-            response_format={
-                "type": "text",
-                "mime_type": "application/json",
-                "schema": schema_model.model_json_schema(),
-            },
-        )
+        interaction = None
+        for attempt in range(settings.AGENT_MAX_RETRIES + 1):
+            try:
+                interaction = client.interactions.create(
+                    model=settings.GEMINI_MODEL,
+                    input=prompt,
+                    response_format={
+                        "type": "text",
+                        "mime_type": "application/json",
+                        "schema": schema_model.model_json_schema(),
+                    },
+                )
+                break
+            except Exception as exc:
+                delay = _rate_limit_delay(exc)
+                if delay is None or attempt >= settings.AGENT_MAX_RETRIES:
+                    raise
+                logger.warning(
+                    "Gemini aplicó límite de cuota; reintento %s en %.2f segundos.",
+                    attempt + 1,
+                    delay,
+                )
+                time.sleep(delay)
 
         output_text = getattr(interaction, "output_text", None)
 
@@ -94,14 +121,14 @@ def _call_gemini(prompt, schema_model):
             logger.error(
                 "La respuesta de Gemini no cumplió el esquema. "
                 "Respuesta recibida: %s",
-                contenido,
+                "contenido omitido por proteccion de datos",
             )
             logger.exception(
                 "Detalle de validación Pydantic: %s",
                 exc,
             )
 
-            detalle = exc.errors(include_url=False)[:3]
+            detalle = "respuesta estructurada invalida"
 
             raise GeminiServiceError(
                 "Gemini respondió, pero algunos datos no tenían "
@@ -126,7 +153,7 @@ def _call_gemini(prompt, schema_model):
 
         detalle = ""
 
-        if settings.DEBUG:
+        if False and settings.DEBUG:
             detalle = (
                 f" Detalle técnico: "
                 f"{type(exc).__name__}: {exc}"
