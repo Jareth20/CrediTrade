@@ -3,7 +3,7 @@
   "regions": ["gru1"],
   "functions": {
     "creditrade/wsgi.py": {
-      "maxDuration": 60
+      "maxDuration": 180
     }
   }
 }

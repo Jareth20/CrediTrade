@@ -168,15 +168,15 @@ def generar_sugerencias_nota(nota, operador):
     antecedentes = list(
         NotaCredito.objects.filter(cliente_vendedor=nota.cliente_vendedor)
         .exclude(pk=nota.pk)
-        .order_by("-actualizado_en")[:8]
+        .order_by("-actualizado_en")[:4]
     )
     documentos = [
         {
             "tipo": documento.tipo_documento,
             "fuente": documento.fuente,
-            "texto": documento.texto_extraido[:2500],
+            "texto": documento.texto_extraido[:1200],
         }
-        for documento in nota.documentos.all()[:6]
+        for documento in nota.documentos.all()[:3]
         if documento.texto_extraido
     ]
 
@@ -221,12 +221,13 @@ No afirmes que un título existe si la evidencia no lo demuestra.
 Si no existe evidencia suficiente para un campo, omítelo.
 Cada sugerencia debe identificar una fuente concreta y explicar brevemente la evidencia.
 Las sugerencias serán revisadas, aceptadas o rechazadas por un operador humano.
+
 Reglas obligatorias para la respuesta:
 
 1. Devuelve un objeto JSON con una propiedad llamada "sugerencias".
 2. "sugerencias" siempre debe ser una lista.
 3. Si no existe evidencia suficiente, devuelve:
-   {"sugerencias": []}
+   {{"sugerencias": []}}
 4. Utiliza únicamente estos nombres exactos de campos:
    - tipo_nota
    - origen_tributario
@@ -242,7 +243,10 @@ Caso actual:
 {json.dumps(_serialize_note(nota), ensure_ascii=False)}
 
 Antecedentes del mismo RUC:
-{json.dumps([_serialize_note(item) for item in antecedentes], ensure_ascii=False)}
+{json.dumps(
+    [_serialize_note(item) for item in antecedentes],
+    ensure_ascii=False,
+)}
 
 Documentos y texto de respaldo:
 {json.dumps(documentos, ensure_ascii=False)}
