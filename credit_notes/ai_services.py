@@ -5,10 +5,13 @@ from typing import List, Literal
 
 from django.conf import settings
 from django.db import transaction
+from pydantic import BaseModel
 
 from .models import NotaCredito, ReporteIA, SugerenciaIA
 from .services import registrar_evento
+import re
 
+from pydantic import ValidationError
 logger = logging.getLogger(__name__)
 
 ALLOWED_SUGGESTION_FIELDS = {
@@ -67,11 +70,43 @@ def _call_gemini(prompt, schema_model):
             },
         )
 
-        output_text = getattr(
-            interaction,
-            "output_text",
-            None,
-        )
+        output_text = getattr(interaction, "output_text", None)
+
+        if not output_text:
+            raise GeminiServiceError(
+                "Gemini respondió sin contenido."
+            )
+
+        contenido = output_text.strip()
+
+        # Protección adicional por si la respuesta incluye bloques Markdown.
+        contenido = re.sub(
+            r"^```(?:json)?\s*|\s*```$",
+            "",
+            contenido,
+            flags=re.IGNORECASE,
+        ).strip()
+
+        try:
+            return schema_model.model_validate_json(contenido)
+
+        except ValidationError as exc:
+            logger.error(
+                "La respuesta de Gemini no cumplió el esquema. "
+                "Respuesta recibida: %s",
+                contenido,
+            )
+            logger.exception(
+                "Detalle de validación Pydantic: %s",
+                exc,
+            )
+
+            detalle = exc.errors(include_url=False)[:3]
+
+            raise GeminiServiceError(
+                "Gemini respondió, pero algunos datos no tenían "
+                f"el formato esperado. Detalle: {detalle}"
+            ) from exc
 
         if not output_text:
             raise GeminiServiceError(
@@ -148,22 +183,35 @@ def generar_sugerencias_nota(nota, operador):
     from pydantic import BaseModel, Field
 
     class SuggestedField(BaseModel):
-        campo: Literal[
-            "tipo_nota",
-            "origen_tributario",
-            "valor_nominal",
-            "saldo_disponible",
-            "minimo_recibir",
-            "fecha_emision",
-            "estado_fuente",
-        ]
-        valor_sugerido: str
-        confianza: float = Field(ge=0, le=1)
-        fuente: str
-        evidencia: str
+        campo: str = Field(
+        description=(
+            "Nombre exacto del campo sugerido. Valores permitidos: "
+            "tipo_nota, origen_tributario, valor_nominal, "
+            "saldo_disponible, minimo_recibir, fecha_emision "
+            "o estado_fuente."
+        )
+    )
+    valor_sugerido: str = Field(
+        description="Valor sugerido expresado como texto."
+    )
+    confianza: float = Field(
+        default=0.70,
+        ge=0,
+        le=1,
+        description="Confianza entre 0 y 1.",
+    )
+    fuente: str = Field(
+        description="Antecedente o documento utilizado."
+    )
+    evidencia: str = Field(
+        description="Explicación breve de la evidencia encontrada."
+    )
+
 
     class SuggestionBundle(BaseModel):
-        sugerencias: List[SuggestedField]
+        sugerencias: list[SuggestedField] = Field(
+        default_factory=list
+    )
 
     prompt = f"""
 Eres el asistente de debida diligencia de CrediTrade, un MVP para una casa de valores en Ecuador.
@@ -173,6 +221,22 @@ No afirmes que un título existe si la evidencia no lo demuestra.
 Si no existe evidencia suficiente para un campo, omítelo.
 Cada sugerencia debe identificar una fuente concreta y explicar brevemente la evidencia.
 Las sugerencias serán revisadas, aceptadas o rechazadas por un operador humano.
+Reglas obligatorias para la respuesta:
+
+1. Devuelve un objeto JSON con una propiedad llamada "sugerencias".
+2. "sugerencias" siempre debe ser una lista.
+3. Si no existe evidencia suficiente, devuelve:
+   {"sugerencias": []}
+4. Utiliza únicamente estos nombres exactos de campos:
+   - tipo_nota
+   - origen_tributario
+   - valor_nominal
+   - saldo_disponible
+   - minimo_recibir
+   - fecha_emision
+   - estado_fuente
+5. No incluyas texto fuera del JSON.
+6. No inventes datos del SRI, DECEVALE ni del cliente.
 
 Caso actual:
 {json.dumps(_serialize_note(nota), ensure_ascii=False)}
@@ -185,7 +249,21 @@ Documentos y texto de respaldo:
 """
 
     bundle = _call_gemini(prompt, SuggestionBundle)
-    suggestions = [item.model_dump() for item in bundle.sugerencias]
+    campos_permitidos = {
+        "tipo_nota",
+        "origen_tributario",
+        "valor_nominal",
+        "saldo_disponible",
+        "minimo_recibir",
+        "fecha_emision",
+        "estado_fuente",
+    }
+
+    suggestions = [
+        item.model_dump()
+        for item in bundle.sugerencias
+        if item.campo in campos_permitidos
+    ]
 
     with transaction.atomic():
         # Solo se sustituyen sugerencias pendientes después de una respuesta válida de Gemini.
