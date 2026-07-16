@@ -1,0 +1,11 @@
+<div class="section-heading">
+  <div><span class="section-kicker">Control de reglas</span><h2>Validación</h2><p>Resultado inmutable, evidencia y estado reportado por la fuente.</p></div>
+  {% if user.es_contador or user.is_superuser %}{% if nota.estado_flujo == 'PENDIENTE_VALIDACION' %}<a class="btn btn-primary" href="{% url 'validation_detail' nota.pk %}"><i class="bi bi-shield-check me-1"></i>Abrir validación</a>{% endif %}{% endif %}
+</div>
+{% if latest_validation %}
+<article class="soft-card section-card">
+  <div class="section-card-header"><div><h3>Último resultado comparativo</h3><p>Registrado {{ latest_validation.creado_en|date:'d/m/Y H:i' }}</p></div><span class="status-pill">{{ latest_validation.get_resultado_display }}</span></div>
+  <div class="row g-3"><div class="col-sm-6 col-lg-3"><div class="detail-block"><span>Existe</span><strong>{% if latest_validation.existe %}Sí{% else %}No{% endif %}</strong></div></div><div class="col-sm-6 col-lg-3"><div class="detail-block"><span>Saldo fuente</span><strong>{% if latest_validation.saldo_fuente != None %}${{ latest_validation.saldo_fuente|floatformat:2 }}{% else %}-{% endif %}</strong></div></div><div class="col-sm-6 col-lg-3"><div class="detail-block"><span>Estado</span><strong>{{ latest_validation.estado_fuente|default:'-' }}</strong></div></div><div class="col-sm-6 col-lg-3"><div class="detail-block"><span>Bloqueada</span><strong>{% if latest_validation.bloqueada %}Sí{% else %}No{% endif %}</strong></div></div></div>
+  {% if latest_validation.explicacion_ia %}<div class="explanation-box mt-4"><span><i class="bi bi-stars"></i>Explicación asistida</span><p class="pre-line mb-0">{{ latest_validation.explicacion_ia }}</p></div>{% endif %}
+</article>
+{% else %}<div class="soft-card section-card section-empty"><i class="bi bi-shield"></i><h3>Aún no existe una validación</h3><p>Cuando el contador ejecute la comparación, el resultado aparecerá en esta sección.</p></div>{% endif %}

@@ -1,124 +1,83 @@
 {% extends 'base.html' %}
 {% block title %}{{ nota.numero_titulo }} | CrediTrade{% endblock %}
 {% block content %}
-<div class="page-header d-flex justify-content-between align-items-start flex-wrap gap-3">
-  <div>
-    <div class="eyebrow">Expediente único</div>
-    <h1 class="h3 mb-1">{{ nota.numero_titulo }}</h1>
-    <div class="d-flex align-items-center gap-2 flex-wrap"><span class="status-pill status-main">{{ nota.get_estado_flujo_display }}</span><span class="text-muted small">Actualizado {{ nota.actualizado_en|date:'d/m/Y H:i' }}</span></div>
+<nav aria-label="Ruta de navegación" class="mb-3">
+  <ol class="breadcrumb app-breadcrumb mb-0">
+    <li class="breadcrumb-item"><a href="{% url 'dashboard' %}">Inicio</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'nota_list' %}">Expedientes</a></li>
+    <li class="breadcrumb-item active" aria-current="page">{{ nota.numero_titulo }}</li>
+  </ol>
+</nav>
+
+<header class="expediente-hero">
+  <div class="expediente-identity">
+    <span class="expediente-icon" aria-hidden="true"><i class="bi bi-file-earmark-text"></i></span>
+    <div>
+      <div class="eyebrow">Expediente inteligente</div>
+      <div class="d-flex align-items-center gap-2 flex-wrap">
+        <h1 class="h3 mb-0">{{ nota.numero_titulo }}</h1>
+        <span class="status-pill status-main">{{ nota.get_estado_flujo_display }}</span>
+      </div>
+      <p class="expediente-client mb-0">{{ nota.cliente_vendedor.nombre_razon_social }}</p>
+      <div class="expediente-meta">
+        <span><i class="bi bi-person"></i>{{ nota.recepcionista.get_full_name|default:nota.recepcionista.username }}</span>
+        <span><i class="bi bi-clock"></i>{{ nota.actualizado_en|date:'d/m/Y H:i' }}</span>
+      </div>
+    </div>
   </div>
-  <div class="d-flex gap-2 flex-wrap">
-    <a class="btn btn-outline-secondary" href="{% url 'nota_list' %}"><i class="bi bi-arrow-left me-1"></i>Expedientes</a>
-    {% if user.es_recepcionista and nota.estado_flujo == 'BORRADOR' or user.es_recepcionista and nota.estado_flujo == 'CORRECCION_REQUERIDA' %}<a class="btn btn-outline-primary" href="{% url 'nota_edit' nota.pk %}"><i class="bi bi-pencil me-1"></i>Editar</a>{% endif %}
-    {% if user.es_recepcionista or user.is_superuser %}<a class="btn btn-outline-danger" href="{% url 'nota_delete' nota.pk %}"><i class="bi bi-trash3 me-1"></i>Eliminar</a>{% endif %}
+  <div class="d-flex gap-2 flex-wrap expediente-header-actions">
+    <a class="btn btn-outline-secondary" href="{% url 'nota_list' %}"><i class="bi bi-arrow-left me-1"></i>Volver</a>
+    <div class="dropdown">
+      <button class="btn btn-outline-primary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-three-dots me-1"></i>Opciones</button>
+      <ul class="dropdown-menu dropdown-menu-end action-dropdown">
+        {% if user.es_recepcionista and nota.estado_flujo == 'BORRADOR' or user.es_recepcionista and nota.estado_flujo == 'CORRECCION_REQUERIDA' %}<li><a class="dropdown-item" href="{% url 'nota_edit' nota.pk %}"><i class="bi bi-pencil"></i>Editar expediente</a></li>{% endif %}
+        {% if user.is_superuser and nota.estado_flujo == 'BORRADOR' or user.is_superuser and nota.estado_flujo == 'CORRECCION_REQUERIDA' %}<li><a class="dropdown-item" href="{% url 'nota_edit' nota.pk %}"><i class="bi bi-pencil"></i>Editar expediente</a></li>{% endif %}
+        {% if user.es_recepcionista or user.is_superuser %}<li><hr class="dropdown-divider"></li><li><a class="dropdown-item text-danger" href="{% url 'nota_delete' nota.pk %}"><i class="bi bi-trash3"></i>Eliminar expediente</a></li>{% endif %}
+      </ul>
+    </div>
+  </div>
+</header>
+
+<div class="next-action soft-card p-3 mt-3"><i class="bi bi-arrow-right-circle me-2"></i><strong>Próxima acción:</strong> {{ nota.proxima_accion }}</div>
+
+<div class="expediente-layout mt-4">
+  <nav class="expediente-tabs" aria-label="Secciones del expediente">
+    <div class="nav nav-pills" id="expedienteTabs" role="tablist">
+      <button class="nav-link active" id="resumen-tab" data-bs-toggle="pill" data-bs-target="#resumen" type="button" role="tab" aria-controls="resumen" aria-selected="true" data-section="resumen"><i class="bi bi-grid"></i><span>Resumen</span></button>
+      <button class="nav-link" id="documentos-tab" data-bs-toggle="pill" data-bs-target="#documentos" type="button" role="tab" aria-controls="documentos" aria-selected="false" data-section="documentos"><i class="bi bi-paperclip"></i><span>Documentos</span><span class="tab-count">{{ nota.documentos.count }}</span></button>
+      <button class="nav-link" id="analisis-tab" data-bs-toggle="pill" data-bs-target="#analisis" type="button" role="tab" aria-controls="analisis" aria-selected="false" data-section="analisis"><i class="bi bi-diagram-3"></i><span>Análisis IA</span>{% if ejecucion_agente.estado == 'ESPERANDO_HUMANO' %}<span class="tab-alert" title="Revisión pendiente"></span>{% endif %}</button>
+      <button class="nav-link" id="validacion-tab" data-bs-toggle="pill" data-bs-target="#validacion" type="button" role="tab" aria-controls="validacion" aria-selected="false" data-section="validacion"><i class="bi bi-shield-check"></i><span>Validación</span>{% if latest_validation %}<span class="tab-count">1</span>{% endif %}</button>
+      <button class="nav-link" id="negociacion-tab" data-bs-toggle="pill" data-bs-target="#negociacion" type="button" role="tab" aria-controls="negociacion" aria-selected="false" data-section="negociacion"><i class="bi bi-briefcase"></i><span>Negociación</span>{% if orden %}<span class="tab-count">1</span>{% endif %}</button>
+      <button class="nav-link" id="trazabilidad-tab" data-bs-toggle="pill" data-bs-target="#trazabilidad" type="button" role="tab" aria-controls="trazabilidad" aria-selected="false" data-section="trazabilidad"><i class="bi bi-clock-history"></i><span>Trazabilidad</span></button>
+    </div>
+  </nav>
+
+  <div class="tab-content expediente-content" id="expedienteTabContent">
+    <section class="tab-pane fade show active" id="resumen" role="tabpanel" aria-labelledby="resumen-tab" tabindex="0">{% include 'credit_notes/partials/nota_resumen.html' %}</section>
+    <section class="tab-pane fade" id="documentos" role="tabpanel" aria-labelledby="documentos-tab" tabindex="0">{% include 'credit_notes/partials/nota_documentos.html' %}</section>
+    <section class="tab-pane fade" id="analisis" role="tabpanel" aria-labelledby="analisis-tab" tabindex="0">{% include 'credit_notes/partials/nota_analisis.html' %}</section>
+    <section class="tab-pane fade" id="validacion" role="tabpanel" aria-labelledby="validacion-tab" tabindex="0">{% include 'credit_notes/partials/nota_validacion.html' %}</section>
+    <section class="tab-pane fade" id="negociacion" role="tabpanel" aria-labelledby="negociacion-tab" tabindex="0">{% include 'credit_notes/partials/nota_negociacion.html' %}</section>
+    <section class="tab-pane fade" id="trazabilidad" role="tabpanel" aria-labelledby="trazabilidad-tab" tabindex="0">{% include 'credit_notes/partials/nota_trazabilidad.html' %}</section>
   </div>
 </div>
+{% endblock %}
 
-<div class="next-action soft-card p-3 mt-4"><i class="bi bi-arrow-right-circle me-2"></i><strong>Próxima acción:</strong> {{ nota.proxima_accion }}</div>
-
-<section class="agent-center soft-card p-4 mt-4" aria-labelledby="agent-center-title">
-  <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
-    <div><div class="eyebrow">Orquestacion LangGraph</div><h2 class="h4 mb-1" id="agent-center-title">Centro de analisis asistido</h2><p class="text-muted mb-0">Agentes especializados preparan evidencia y recomendaciones; el operador conserva cada decision.</p></div>
-    <form method="post" action="{% url 'agent_analysis_start' nota.pk %}" data-loading-message="Preparando expediente... Recuperando antecedentes y analizando inconsistencias.">{% csrf_token %}<button class="btn btn-primary" type="submit" {% if ejecucion_agente.estado == 'EJECUTANDO' or ejecucion_agente.estado == 'ESPERANDO_HUMANO' %}disabled{% endif %}><i class="bi bi-diagram-3 me-1"></i>{% if ejecucion_agente %}Nuevo analisis{% else %}Analizar expediente{% endif %}</button></form>
-  </div>
-  {% if ejecucion_agente %}
-  <div class="agent-status-grid mt-4"><div><span>Estado</span><strong>{{ ejecucion_agente.get_estado_display }}</strong></div><div><span>Etapa actual</span><strong>{% if ejecucion_agente.estado == 'COMPLETADA' %}Completada{% else %}{{ ejecucion_agente.etapa_display|default:'Supervisor' }}{% endif %}</strong></div><div><span>Necesita del operador</span><strong>{% if ejecucion_agente.estado == 'COMPLETADA' %}Nada por ahora{% else %}{{ ejecucion_agente.nodo_pendiente_display|default:'Nada por ahora' }}{% endif %}</strong></div><div><span>Actualizado</span><strong>{{ ejecucion_agente.actualizada_en|date:'d/m/Y H:i' }}</strong></div></div>
-  {% if ejecucion_agente.error_amigable %}<div class="alert alert-warning mt-3 mb-0">{{ ejecucion_agente.error_amigable }}</div>{% endif %}
-  <div class="row g-4 mt-1"><div class="col-lg-7"><h3 class="h6">Actividad real de agentes</h3><div class="agent-flow" aria-label="Progreso del flujo de agentes">
-    {% for evento in ejecucion_agente.eventos.all %}<div class="agent-step"><span class="agent-icon"><i class="bi {% if evento.estado == 'ERROR' %}bi-exclamation-triangle{% else %}bi-check2{% endif %}"></i></span><div><strong>{{ evento.agente_display }}</strong><p>{{ evento.resumen }}</p><small>{{ evento.creado_en|date:'d/m/Y H:i:s' }}</small></div></div>{% empty %}<p class="text-muted small">El supervisor aun no ha iniciado nodos.</p>{% endfor %}
-  </div></div><div class="col-lg-5">
-    {% if estado_agente.resultado_final.explicacion %}<div class="evidence-summary"><h3 class="h6">Qué encontró</h3><p>{{ estado_agente.resultado_final.explicacion.conclusion }}</p><div class="small"><strong>Fuentes:</strong> {{ estado_agente.resultado_final.explicacion.fuentes_utilizadas }}</div><div class="small mt-2"><strong>Decisión requerida:</strong> {% if ejecucion_agente.estado == 'COMPLETADA' %}Ninguna; la decisión fue registrada.{% else %}{{ estado_agente.resultado_final.explicacion.decision_requerida }}{% endif %}</div></div>{% endif %}
-    {% if decision_agente_form and ejecucion_agente.operador_id == user.id or decision_agente_form and user.is_superuser %}<form class="human-checkpoint mt-3" method="post" action="{% url 'agent_analysis_decide' ejecucion_agente.pk %}" data-loading-message="Registrando tu decision y reanudando el flujo de forma segura...">{% csrf_token %}<h3 class="h6"><i class="bi bi-person-check me-1"></i>Checkpoint humano</h3>{% for field in decision_agente_form %}<div class="mb-2"><label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}</div>{% endfor %}<button class="btn btn-primary w-100" type="submit">Registrar y continuar</button></form>{% endif %}
-  </div></div>
-  {% if estado_agente.fragmentos_recuperados %}<div class="mt-4"><h3 class="h6">RAG: evidencia recuperada</h3><div class="row g-3">{% for fuente in estado_agente.fragmentos_recuperados %}<div class="col-lg-6"><article class="source-card h-100"><div class="d-flex justify-content-between gap-2"><strong>{{ fuente.documento }}</strong><span class="confidence">{{ fuente.relevancia|floatformat:2 }}</span></div><p>{{ fuente.texto|truncatechars:320 }}</p><small>{{ fuente.fuente }} · {{ fuente.nota }} · {{ fuente.seccion }} · {{ fuente.fecha|slice:':10' }}</small></article></div>{% endfor %}</div></div>
-  {% elif ejecucion_agente.estado != 'EJECUTANDO' %}<div class="empty-evidence mt-4"><i class="bi bi-file-earmark-search"></i><div><strong>Sin evidencia semantica suficiente</strong><p>Carga texto extraible o reintenta cuando el servicio de embeddings este disponible.</p></div></div>{% endif %}
-  {% if estado_agente.resultado_final.escenarios_negociacion %}<div class="mt-4"><div class="d-flex justify-content-between align-items-center gap-2"><h3 class="h6 mb-0">Escenarios del agente de negociación</h3><span class="status-pill status-warning">Requieren aprobación humana</span></div><div class="scenario-grid mt-3">{% for escenario in estado_agente.resultado_final.escenarios_negociacion %}<article class="scenario-card"><span>{{ escenario.nombre }}</span><strong>${{ escenario.valor }}</strong><small>Descuento {{ escenario.descuento }}%</small><p>{{ escenario.explicacion }}</p></article>{% endfor %}</div><div class="info-note mt-3"><i class="bi bi-person-check me-1"></i>Estos escenarios no envían ofertas ni modifican el borrador guardado.</div></div>{% endif %}
-  {% if estado_agente.hallazgos %}<div class="mt-4"><h3 class="h6">Hallazgos y riesgos</h3><div class="row g-2">{% for item in estado_agente.hallazgos %}<div class="col-lg-6"><div class="finding finding-{{ item.severidad }}"><span>{{ item.severidad }}</span><div><strong>{{ item.tipo|capfirst }}</strong><p>{{ item.por_que_importa }}</p></div></div></div>{% endfor %}</div></div>{% endif %}
-  {% else %}<div class="empty-evidence mt-4"><i class="bi bi-diagram-3"></i><div><strong>Expediente listo para analizar</strong><p>El supervisor coordinara documentos, antecedentes, evidencia y riesgos.</p></div></div>{% endif %}
-</section>
-
-<div class="row g-4 mt-1">
-  <div class="col-xl-8">
-    <div class="soft-card p-4 mb-4">
-      <div class="d-flex justify-content-between align-items-center mb-3"><h2 class="h5 mb-0">Datos confirmados</h2><span class="tiny text-muted">Guardados en PostgreSQL</span></div>
-      <div class="row g-3">
-        <div class="col-md-6"><div class="detail-block"><span>Titular / vendedor</span><strong>{{ nota.cliente_vendedor.nombre_razon_social }}</strong><small>{{ nota.cliente_vendedor.ruc_identificacion }}</small></div></div>
-        <div class="col-md-6"><div class="detail-block"><span>Comprador</span><strong>{{ nota.cliente_comprador.nombre_razon_social|default:'No asignado' }}</strong><small>{{ nota.cliente_comprador.ruc_identificacion|default:'' }}</small></div></div>
-        <div class="col-md-6"><div class="detail-block"><span>Tipo de nota</span><strong>{{ nota.get_tipo_nota_display }}</strong></div></div>
-        <div class="col-md-6"><div class="detail-block"><span>Origen tributario</span><strong>{{ nota.get_origen_tributario_display }}</strong></div></div>
-        <div class="col-md-4"><div class="detail-block"><span>Valor nominal</span><strong>${{ nota.valor_nominal|floatformat:2 }}</strong></div></div>
-        <div class="col-md-4"><div class="detail-block"><span>Saldo disponible</span><strong>${{ nota.saldo_disponible|floatformat:2 }}</strong></div></div>
-        <div class="col-md-4"><div class="detail-block"><span>Mínimo a recibir</span><strong>${{ nota.minimo_recibir|floatformat:2 }}</strong></div></div>
-        <div class="col-md-4"><div class="detail-block"><span>Fecha emisión</span><strong>{{ nota.fecha_emision|date:'d/m/Y'|default:'-' }}</strong></div></div>
-        <div class="col-md-4"><div class="detail-block"><span>Estado fuente</span><strong>{{ nota.estado_fuente|default:'Pendiente' }}</strong></div></div>
-        <div class="col-md-4"><div class="detail-block"><span>Máximo descuento</span><strong>{{ nota.descuento_maximo_porcentaje|floatformat:2 }}%</strong></div></div>
-      </div>
-      {% if nota.observaciones_recepcion %}<hr><h3 class="h6">Observaciones de recepción</h3><p class="mb-0 text-muted">{{ nota.observaciones_recepcion }}</p>{% endif %}
-      {% if nota.observaciones_validacion %}<hr><h3 class="h6">Observaciones de validación</h3><p class="mb-0 text-muted">{{ nota.observaciones_validacion }}</p>{% endif %}
-    </div>
-
-    <div class="soft-card p-4 mb-4">
-      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3"><h2 class="h5 mb-0">Documentos de respaldo</h2>{% if user.es_recepcionista or user.es_contador or user.is_superuser %}<a class="btn btn-sm btn-outline-primary" href="{% url 'documento_add' nota.pk %}"><i class="bi bi-plus-lg me-1"></i>Agregar</a>{% endif %}</div>
-      <div class="list-group list-group-flush">
-      {% for doc in nota.documentos.all %}
-        <div class="list-group-item bg-transparent px-0 d-flex justify-content-between gap-3"><div><strong>{{ doc.nombre }}</strong><div class="small text-muted">{{ doc.get_tipo_documento_display }} · {{ doc.fuente }} · {{ doc.cargado_en|date:'d/m/Y H:i' }}</div><code class="document-hash">SHA-256 {{ doc.hash_sha256 }}</code></div>{% if doc.archivo_url %}<a class="btn btn-sm btn-outline-secondary" href="{{ doc.archivo_url }}" target="_blank" rel="noopener">Abrir</a>{% endif %}</div>
-      {% empty %}<div class="text-muted text-center py-3">No hay documentos. Para enviar a validación se requiere al menos uno.</div>{% endfor %}
-      </div>
-    </div>
-
-    {% if latest_validation %}
-    <div class="soft-card p-4 mb-4">
-      <div class="d-flex justify-content-between align-items-center mb-3"><h2 class="h5 mb-0">Última validación</h2><span class="status-pill">{{ latest_validation.get_resultado_display }}</span></div>
-      <div class="row g-3"><div class="col-md-3"><div class="detail-block"><span>Existe</span><strong>{% if latest_validation.existe %}Sí{% else %}No{% endif %}</strong></div></div><div class="col-md-3"><div class="detail-block"><span>Saldo fuente</span><strong>{% if latest_validation.saldo_fuente != None %}${{ latest_validation.saldo_fuente|floatformat:2 }}{% else %}-{% endif %}</strong></div></div><div class="col-md-3"><div class="detail-block"><span>Estado</span><strong>{{ latest_validation.estado_fuente|default:'-' }}</strong></div></div><div class="col-md-3"><div class="detail-block"><span>Bloqueada</span><strong>{% if latest_validation.bloqueada %}Sí{% else %}No{% endif %}</strong></div></div></div>
-      {% if latest_validation.explicacion_ia %}<p class="mt-3 mb-0 text-muted pre-line">{{ latest_validation.explicacion_ia }}</p>{% endif %}
-    </div>
-    {% endif %}
-
-    {% if orden %}
-    <div class="soft-card p-4 mb-4">
-      <div class="d-flex justify-content-between align-items-center mb-3"><h2 class="h5 mb-0">Orden de negociación</h2><span class="status-pill">{{ orden.get_estado_display }}</span></div>
-      <div class="row g-3"><div class="col-md-4"><div class="detail-block"><span>Comprador</span><strong>{{ orden.comprador.nombre_razon_social }}</strong></div></div><div class="col-md-4"><div class="detail-block"><span>Valor de venta</span><strong>${{ orden.valor_venta|floatformat:2 }}</strong></div></div><div class="col-md-4"><div class="detail-block"><span>Descuento</span><strong>{{ orden.porcentaje_descuento|floatformat:2 }}%</strong></div></div></div>
-      {% if user.es_vendedor or user.is_superuser %}<div class="d-flex gap-2 justify-content-end mt-3"><a class="btn btn-sm btn-outline-primary" href="{% url 'negotiation_edit' nota.pk %}">Editar</a><a class="btn btn-sm btn-outline-danger" href="{% url 'negotiation_delete' nota.pk %}">Eliminar</a></div>{% endif %}
-    </div>
-    {% endif %}
-
-    <div class="soft-card p-4">
-      <h2 class="h5 mb-3">Trazabilidad</h2>
-      <div class="timeline">
-      {% for evento in eventos %}<div class="timeline-item"><div class="timeline-dot"></div><div><strong>{{ evento.accion }}</strong><div class="small text-muted">{{ evento.creado_en|date:'d/m/Y H:i' }} · {% if evento.operador %}{{ evento.operador.get_full_name|default:evento.operador.username }}{% else %}Confirmación externa / sistema{% endif %}</div><p class="mb-0 mt-1">{{ evento.descripcion }}</p></div></div>{% empty %}<div class="text-muted">Sin eventos.</div>{% endfor %}
-      </div>
-    </div>
-  </div>
-
-  <div class="col-xl-4">
-    <div class="soft-card p-4 mb-4">
-      <h2 class="h5 mb-3">Acciones disponibles</h2>
-      <div class="d-grid gap-2">
-        {% if user.es_recepcionista or user.is_superuser %}
-          {% if nota.estado_flujo == 'BORRADOR' or nota.estado_flujo == 'CORRECCION_REQUERIDA' %}
-          <form method="post" action="{% url 'ai_generate_suggestions' nota.pk %}">{% csrf_token %}<button class="btn btn-outline-primary w-100" type="submit"><i class="bi bi-stars me-1"></i>Generar sugerencias IA</button></form>
-          <a class="btn btn-outline-secondary" href="{% url 'suggestion_review' nota.pk %}">Revisar sugerencias{% if pending_suggestions %} <span class="badge text-bg-primary">{{ pending_suggestions }}</span>{% endif %}</a>
-          <form method="post" action="{% url 'nota_submit_validation' nota.pk %}">{% csrf_token %}<button class="btn btn-primary w-100" type="submit"><i class="bi bi-send me-1"></i>Enviar a validación</button></form>
-          {% endif %}
-        {% endif %}
-        {% if user.es_contador or user.is_superuser %}{% if nota.estado_flujo == 'PENDIENTE_VALIDACION' %}<a class="btn btn-primary" href="{% url 'validation_detail' nota.pk %}"><i class="bi bi-shield-check me-1"></i>Abrir validación</a>{% endif %}{% endif %}
-        {% if user.es_vendedor or user.is_superuser %}
-          {% if nota.estado_flujo == 'VALIDADA' or nota.estado_flujo == 'EN_NEGOCIACION' %}<a class="btn btn-primary" href="{% url 'negotiation_edit' nota.pk %}"><i class="bi bi-briefcase me-1"></i>Preparar negociación</a>{% endif %}
-          {% if orden %}<form method="post" action="{% url 'report_generate' nota.pk %}">{% csrf_token %}<button class="btn btn-outline-primary w-100" type="submit"><i class="bi bi-file-earmark-text me-1"></i>Generar reporte IA</button></form>{% endif %}
-          {% if orden and reportes %}{% if nota.estado_flujo == 'EN_NEGOCIACION' %}<form method="post" action="{% url 'approval_requests_create' nota.pk %}">{% csrf_token %}<button class="btn btn-outline-primary w-100" type="submit"><i class="bi bi-link-45deg me-1"></i>Solicitar confirmaciones</button></form>{% endif %}{% endif %}
-          {% if nota.estado_flujo == 'PENDIENTE_CONFIRMACIONES' or nota.estado_flujo == 'LISTA_LIQUIDACION' %}<a class="btn btn-outline-secondary" href="{% url 'approval_links' nota.pk %}">Ver enlaces y estados</a>{% endif %}
-          {% if nota.estado_flujo == 'LISTA_LIQUIDACION' %}<form method="post" action="{% url 'close_demo' nota.pk %}">{% csrf_token %}<button class="btn btn-success w-100" type="submit"><i class="bi bi-check2-circle me-1"></i>Registrar cierre demo</button></form>{% endif %}
-        {% endif %}
-      </div>
-    </div>
-    <div class="soft-card p-4 mb-4">
-      <h2 class="h5 mb-3">Responsables</h2>
-      <dl class="detail-grid mb-0"><dt>Recepción</dt><dd>{{ nota.recepcionista.get_full_name|default:nota.recepcionista.username }}</dd><dt>Validación</dt><dd>{% if nota.contador %}{{ nota.contador.get_full_name|default:nota.contador.username }}{% else %}Pendiente{% endif %}</dd><dt>Negociación</dt><dd>{% if nota.vendedor %}{{ nota.vendedor.get_full_name|default:nota.vendedor.username }}{% else %}Pendiente{% endif %}</dd></dl>
-    </div>
-    <div class="soft-card p-4">
-      <h2 class="h5 mb-3">Reportes</h2>
-      {% for reporte in reportes %}<a href="{% url 'report_detail' reporte.pk %}" class="report-link"><i class="bi bi-file-earmark-pdf me-2"></i><span>{{ reporte.titulo }}<small>{{ reporte.generado_en|date:'d/m/Y H:i' }}</small></span></a>{% empty %}<p class="small text-muted mb-0">Aún no hay borradores de reporte.</p>{% endfor %}
-    </div>
-  </div>
-</div>
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  const validSections = ['resumen', 'documentos', 'analisis', 'validacion', 'negociacion', 'trazabilidad'];
+  const requested = window.location.hash.replace('#', '');
+  if (validSections.includes(requested)) {
+    const trigger = document.querySelector('[data-section="' + requested + '"]');
+    if (trigger) bootstrap.Tab.getOrCreateInstance(trigger).show();
+  }
+  document.querySelectorAll('#expedienteTabs [data-bs-toggle="pill"]').forEach(function (trigger) {
+    trigger.addEventListener('shown.bs.tab', function (event) {
+      history.replaceState(null, '', '#' + event.target.dataset.section);
+      document.querySelector('.expediente-content')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+});
+</script>
 {% endblock %}

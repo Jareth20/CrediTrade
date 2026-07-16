@@ -180,6 +180,26 @@ class WorkflowTests(TestCase):
             generar_reporte_negociacion(self.note, self.seller_operator)
         self.assertFalse(ReporteIA.objects.exists())
 
+    def test_confirmations_do_not_require_an_ai_report_or_pdf(self):
+        order = self.prepare_order()
+        client = HttpClient()
+        client.force_login(self.seller_operator)
+
+        response = client.post(
+            reverse("approval_requests_create", args=[self.note.pk])
+        )
+
+        self.assertRedirects(
+            response, reverse("approval_links", args=[self.note.pk])
+        )
+        self.assertFalse(ReporteIA.objects.exists())
+        self.assertEqual(order.solicitudes.count(), 2)
+        self.note.refresh_from_db()
+        self.assertEqual(
+            self.note.estado_flujo,
+            NotaCredito.EstadoFlujo.PENDIENTE_CONFIRMACIONES,
+        )
+
     @patch("credit_notes.ai_services._call_gemini")
     def test_suggestions_are_saved_only_after_valid_gemini_response(self, mock_call):
         self.add_document()
@@ -307,6 +327,25 @@ class AgenticArchitectureTests(WorkflowTests):
         detail = client.get(reverse("nota_detail", args=[self.note.pk]))
         self.assertContains(detail, "Centro de analisis asistido")
         self.assertContains(detail, "RAG: evidencia recuperada")
+
+    def test_note_detail_organizes_information_in_accessible_sections(self):
+        client = HttpClient()
+        client.force_login(self.reception)
+        detail = client.get(reverse("nota_detail", args=[self.note.pk]))
+
+        self.assertEqual(detail.status_code, 200)
+        for section in (
+            "resumen",
+            "documentos",
+            "analisis",
+            "validacion",
+            "negociacion",
+            "trazabilidad",
+        ):
+            self.assertContains(detail, f'id="{section}"')
+            self.assertContains(detail, f'data-section="{section}"')
+        self.assertContains(detail, 'aria-label="Secciones del expediente"')
+        self.assertContains(detail, 'aria-current="page"')
 
     def test_chunking_is_bounded_and_overlapping(self):
         chunks = fragmentar_texto(" ".join(["evidencia"] * 400), tamano=180, solapamiento=30)

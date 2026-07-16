@@ -1,0 +1,6 @@
+<div class="section-heading"><div><span class="section-kicker">Auditoría</span><h2>Trazabilidad</h2><p>Historial cronológico de acciones humanas y eventos del sistema.</p></div></div>
+<article class="soft-card section-card">
+  <div class="timeline">
+  {% for evento in eventos %}<div class="timeline-item"><div class="timeline-dot"></div><div class="timeline-content"><div class="d-flex justify-content-between gap-3 flex-wrap"><strong>{{ evento.accion }}</strong><time>{{ evento.creado_en|date:'d/m/Y H:i' }}</time></div><span>{% if evento.operador %}{{ evento.operador.get_full_name|default:evento.operador.username }}{% else %}Confirmación externa / sistema{% endif %}</span><p>{{ evento.descripcion }}</p></div></div>{% empty %}<div class="section-empty"><i class="bi bi-clock-history"></i><h3>Sin eventos todavía</h3><p>Las decisiones y cambios del expediente aparecerán aquí.</p></div>{% endfor %}
+  </div>
+</article>

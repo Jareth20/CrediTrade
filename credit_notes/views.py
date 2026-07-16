@@ -826,9 +826,6 @@ def approval_requests_create(request, pk):
     if not order or order.eliminado_en:
         messages.error(request, "Primero crea la orden de negociación.")
         return redirect("nota_detail", pk=note.pk)
-    if not note.reportes_ia.exists():
-        messages.error(request, "Genera y revisa al menos un reporte antes de solicitar confirmaciones.")
-        return redirect("nota_detail", pk=note.pk)
     with transaction.atomic():
         snapshot = {"version": order.version, "numero_titulo": note.numero_titulo, "vendedor": note.cliente_vendedor.nombre_razon_social, "comprador": order.comprador.nombre_razon_social, "valor_venta": str(order.valor_venta), "porcentaje_descuento": str(order.porcentaje_descuento), "fecha_propuesta": order.fecha_propuesta.isoformat(), "vigencia_hasta": order.vigencia_hasta.isoformat() if order.vigencia_hasta else "", "terminos": order.terminos, "observaciones": order.observaciones}
         seller_request, _ = SolicitudAprobacion.objects.get_or_create(
@@ -852,7 +849,11 @@ def approval_requests_create(request, pk):
             request.user,
             "CONFIRMACIONES_SOLICITADAS",
             "Se generaron enlaces únicos para vendedor y comprador.",
-            {"solicitudes_generadas": 2, "version_contrato": order.version},
+            {
+                "solicitudes_generadas": 2,
+                "version_contrato": order.version,
+                "reporte_adjunto": note.reportes_ia.exists(),
+            },
         )
     messages.success(request, "Enlaces de confirmación generados.")
     return redirect("approval_links", pk=note.pk)
