@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% load static %}
 {% block title %}{{ nota.numero_titulo }} | CrediTrade{% endblock %}
 {% block content %}
 <nav aria-label="Ruta de navegación" class="mb-3">
@@ -42,13 +43,14 @@
 
 <div class="expediente-layout mt-4">
   <nav class="expediente-tabs" aria-label="Secciones del expediente">
-    <div class="nav nav-pills" id="expedienteTabs" role="tablist">
+    <div class="nav nav-pills{% if langgraph_visualizer_enabled %} has-agent-flow{% endif %}" id="expedienteTabs" role="tablist">
       <button class="nav-link active" id="resumen-tab" data-bs-toggle="pill" data-bs-target="#resumen" type="button" role="tab" aria-controls="resumen" aria-selected="true" data-section="resumen"><i class="bi bi-grid"></i><span>Resumen</span></button>
       <button class="nav-link" id="documentos-tab" data-bs-toggle="pill" data-bs-target="#documentos" type="button" role="tab" aria-controls="documentos" aria-selected="false" data-section="documentos"><i class="bi bi-paperclip"></i><span>Documentos</span><span class="tab-count">{{ nota.documentos.count }}</span></button>
       <button class="nav-link" id="analisis-tab" data-bs-toggle="pill" data-bs-target="#analisis" type="button" role="tab" aria-controls="analisis" aria-selected="false" data-section="analisis"><i class="bi bi-diagram-3"></i><span>Análisis IA</span>{% if ejecucion_agente.estado == 'ESPERANDO_HUMANO' %}<span class="tab-alert" title="Revisión pendiente"></span>{% endif %}</button>
       <button class="nav-link" id="validacion-tab" data-bs-toggle="pill" data-bs-target="#validacion" type="button" role="tab" aria-controls="validacion" aria-selected="false" data-section="validacion"><i class="bi bi-shield-check"></i><span>Validación</span>{% if latest_validation %}<span class="tab-count">1</span>{% endif %}</button>
       <button class="nav-link" id="negociacion-tab" data-bs-toggle="pill" data-bs-target="#negociacion" type="button" role="tab" aria-controls="negociacion" aria-selected="false" data-section="negociacion"><i class="bi bi-briefcase"></i><span>Negociación</span>{% if orden %}<span class="tab-count">1</span>{% endif %}</button>
       <button class="nav-link" id="trazabilidad-tab" data-bs-toggle="pill" data-bs-target="#trazabilidad" type="button" role="tab" aria-controls="trazabilidad" aria-selected="false" data-section="trazabilidad"><i class="bi bi-clock-history"></i><span>Trazabilidad</span></button>
+      {% if langgraph_visualizer_enabled %}<button class="nav-link" id="flujo-agentico-tab" data-bs-toggle="pill" data-bs-target="#flujo-agentico" type="button" role="tab" aria-controls="flujo-agentico" aria-selected="false" data-section="flujo-agentico"><i class="bi bi-bezier2"></i><span>Flujo agéntico</span></button>{% endif %}
     </div>
   </nav>
 
@@ -59,6 +61,7 @@
     <section class="tab-pane fade" id="validacion" role="tabpanel" aria-labelledby="validacion-tab" tabindex="0">{% include 'credit_notes/partials/nota_validacion.html' %}</section>
     <section class="tab-pane fade" id="negociacion" role="tabpanel" aria-labelledby="negociacion-tab" tabindex="0">{% include 'credit_notes/partials/nota_negociacion.html' %}</section>
     <section class="tab-pane fade" id="trazabilidad" role="tabpanel" aria-labelledby="trazabilidad-tab" tabindex="0">{% include 'credit_notes/partials/nota_trazabilidad.html' %}</section>
+    {% if langgraph_visualizer_enabled %}<section class="tab-pane fade" id="flujo-agentico" role="tabpanel" aria-labelledby="flujo-agentico-tab" tabindex="0">{% include 'credit_notes/partials/nota_flujo_agentico.html' %}</section>{% endif %}
   </div>
 </div>
 {% endblock %}
@@ -66,7 +69,7 @@
 {% block extra_js %}
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-  const validSections = ['resumen', 'documentos', 'analisis', 'validacion', 'negociacion', 'trazabilidad'];
+  const validSections = ['resumen', 'documentos', 'analisis', 'validacion', 'negociacion', 'trazabilidad', 'flujo-agentico'];
   const requested = window.location.hash.replace('#', '');
   if (validSections.includes(requested)) {
     const trigger = document.querySelector('[data-section="' + requested + '"]');
@@ -80,4 +83,5 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 });
 </script>
+{% if langgraph_visualizer_enabled %}<script src="{% static 'js/agent_flow_visualizer.js' %}?v=20260717-1" defer></script>{% endif %}
 {% endblock %}

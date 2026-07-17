@@ -719,19 +719,44 @@ class EventoAgente(models.Model):
         INICIADO = "INICIADO", "Iniciado"
         COMPLETADO = "COMPLETADO", "Completado"
         ERROR = "ERROR", "Error controlado"
+        ESPERANDO_HUMANO = "ESPERANDO_HUMANO", "Esperando revisión humana"
+        REANUDADO = "REANUDADO", "Reanudado"
+        CANCELADO = "CANCELADO", "Cancelado"
+        NO_DISPONIBLE = "NO_DISPONIBLE", "Servicio no disponible"
 
     ejecucion = models.ForeignKey(
         EjecucionAgente, on_delete=models.CASCADE, related_name="eventos"
     )
     agente = models.CharField(max_length=80, db_index=True)
-    estado = models.CharField(max_length=12, choices=Estado.choices)
+    estado = models.CharField(max_length=24, choices=Estado.choices)
     resumen = models.CharField(max_length=300)
     metadatos = models.JSONField(default=dict, blank=True)
+    orden = models.PositiveIntegerField(default=0)
+    entrada = models.JSONField(default=dict, blank=True)
+    salida = models.JSONField(default=dict, blank=True)
+    cambios = models.JSONField(default=list, blank=True)
+    fuentes = models.JSONField(default=list, blank=True)
+    transicion = models.CharField(max_length=80, blank=True)
+    iniciada_en = models.DateTimeField(null=True, blank=True)
+    finalizada_en = models.DateTimeField(null=True, blank=True)
+    duracion_ms = models.PositiveIntegerField(null=True, blank=True)
+    intento = models.PositiveSmallIntegerField(default=1)
+    reintentos = models.PositiveSmallIntegerField(default=0)
+    error_controlado = models.CharField(max_length=300, blank=True)
     creado_en = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
-        ordering = ["creado_en"]
-        indexes = [models.Index(fields=["ejecucion", "creado_en"], name="credit_note_ejecuci_5f88c1_idx")]
+        ordering = ["orden", "creado_en"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["ejecucion", "orden"],
+                name="unique_agent_event_order",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["ejecucion", "creado_en"], name="credit_note_ejecuci_5f88c1_idx"),
+            models.Index(fields=["ejecucion", "orden"], name="credit_note_exec_order_idx"),
+        ]
 
     @property
     def agente_display(self):

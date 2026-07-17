@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from django.test import Client as HttpClient, TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from accounts.models import Operador
 from credit_notes.ai_services import (
@@ -38,6 +39,13 @@ from credit_notes.models import (
     OperacionIdempotente,
 )
 from credit_notes.agents import iniciar_analisis, registrar_decision
+from credit_notes.graph_catalog import graph_structure
+from credit_notes.graph_observability import (
+    instrument_node,
+    sanitize_graph_state,
+    state_diff,
+)
+from credit_notes.graph_serializers import serialize_event
 from credit_notes.rag import (
     fragmentar_texto,
     indexar_documento,
@@ -282,8 +290,8 @@ class AgenticArchitectureTests(WorkflowTests):
         self.assertEqual(execution.estado, EjecucionAgente.Estado.ESPERANDO_HUMANO)
         self.assertEqual(execution.nodo_pendiente, "revision_operador")
         nodes = execution.estado_compartido["nodos_ejecutados"]
-        self.assertEqual(nodes, ["supervisor", "ingreso_documental", "antecedentes_rag", "validacion_riesgos", "explicacion", "checkpoint_humano"])
-        self.assertTrue(EventoAgente.objects.filter(ejecucion=execution, agente="antecedentes_rag").exists())
+        self.assertEqual(nodes, ["supervisor", "documental", "rag", "validacion", "explicacion", "checkpoint_humano"])
+        self.assertTrue(EventoAgente.objects.filter(ejecucion=execution, agente="rag").exists())
 
     @patch("credit_notes.agents.preparar_evidencia")
     def test_double_submission_returns_same_execution(self, mocked_rag):
@@ -316,6 +324,206 @@ class AgenticArchitectureTests(WorkflowTests):
         client = HttpClient()
         client.force_login(self.reception)
         self.assertEqual(client.get(reverse("agent_analysis_start", args=[self.note.pk])).status_code, 405)
+
+    def test_real_graph_structure_serializes_nodes_and_edges(self):
+        structure = graph_structure()
+        node_ids = {node["id"] for node in structure["nodes"]}
+        edge_pairs = {(edge["source"], edge["target"]) for edge in structure["edges"]}
+        self.assertIn("supervisor", node_ids)
+        self.assertIn("checkpoint_humano", node_ids)
+        self.assertIn(("supervisor", "documental"), edge_pairs)
+        self.assertIn(("supervisor", "negociacion"), edge_pairs)
+        self.assertTrue(
+            next(node for node in structure["nodes"] if node["id"] == "checkpoint_humano")["human_checkpoint"]
+        )
+
+    def test_state_sanitization_excludes_secrets_and_limits_text(self):
+        sanitized = sanitize_graph_state(
+            {
+                "nota_id": str(self.note.pk),
+                "api_key": "should-never-appear",
+                "datos_nota": {
+                    "numero_titulo": self.note.numero_titulo,
+                    "authorization": "Bearer secret",
+                    "descripcion": "x" * 900,
+                },
+                "resultado_final": {"prompt": "private", "resumen": "visible"},
+            }
+        )
+        serialized = str(sanitized)
+        self.assertNotIn("should-never-appear", serialized)
+        self.assertNotIn("Bearer secret", serialized)
+        self.assertNotIn("private", serialized)
+        self.assertLessEqual(len(sanitized["datos_nota"]["descripcion"]), 500)
+
+    def test_historical_event_metadata_is_resanitized_for_admins(self):
+        execution = EjecucionAgente.objects.create(
+            nota=self.note, operador=self.reception
+        )
+        event = EventoAgente.objects.create(
+            ejecucion=execution,
+            agente="supervisor",
+            estado=EventoAgente.Estado.COMPLETADO,
+            resumen="Ruta seleccionada.",
+            orden=1,
+            metadatos={"prompt": "private prompt", "route": "documental"},
+        )
+        serialized = serialize_event(event, technical=True)
+        self.assertNotIn("prompt", serialized["technical"]["metadata"])
+        self.assertEqual(serialized["technical"]["metadata"]["route"], "documental")
+
+    def test_state_diff_uses_operational_descriptions(self):
+        changes = state_diff(
+            {"etapa_actual": "documental", "cantidad_fragmentos": 0},
+            {"etapa_actual": "rag", "cantidad_fragmentos": 3},
+        )
+        self.assertEqual([item["field"] for item in changes], ["cantidad_fragmentos", "etapa_actual"])
+        self.assertIn("0 → 3", changes[0]["description"])
+
+    @override_settings(LANGGRAPH_VISUALIZER_ENABLED=True)
+    @patch("credit_notes.agents.preparar_evidencia")
+    def test_instrumentation_records_start_finish_order_and_sources(self, mocked_rag):
+        mocked_rag.return_value = self._rag_result()
+        execution, _ = iniciar_analisis(self.note, self.reception)
+        events = list(execution.eventos.order_by("orden"))
+        self.assertEqual([event.orden for event in events], list(range(1, len(events) + 1)))
+        self.assertTrue(events[0].estado == EventoAgente.Estado.INICIADO)
+        self.assertTrue(events[0].entrada)
+        rag_event = execution.eventos.filter(
+            agente="rag", estado=EventoAgente.Estado.COMPLETADO
+        ).get()
+        self.assertTrue(rag_event.salida)
+        self.assertTrue(rag_event.fuentes)
+        self.assertIsNotNone(rag_event.duracion_ms)
+
+    @override_settings(LANGGRAPH_VISUALIZER_ENABLED=True)
+    def test_instrumentation_records_controlled_node_error(self):
+        execution = EjecucionAgente.objects.create(
+            nota=self.note, operador=self.reception
+        )
+
+        def broken(_state):
+            raise RuntimeError("private failure detail")
+
+        wrapped = instrument_node("documental", broken)
+        with self.assertRaises(RuntimeError):
+            wrapped(
+                {
+                    "ejecucion_id": str(execution.pk),
+                    "nota_id": str(self.note.pk),
+                }
+            )
+        error = execution.eventos.get(estado=EventoAgente.Estado.ERROR)
+        self.assertEqual(error.error_controlado, "RuntimeError")
+        self.assertNotIn("private failure detail", error.resumen)
+
+    @override_settings(LANGGRAPH_VISUALIZER_ENABLED=True)
+    @patch("credit_notes.agents.preparar_evidencia")
+    def test_human_interruption_and_resume_are_persisted(self, mocked_rag):
+        mocked_rag.return_value = self._rag_result()
+        self.note.estado_flujo = NotaCredito.EstadoFlujo.VALIDADA
+        self.note.save(update_fields=["estado_flujo"])
+        execution, _ = iniciar_analisis(self.note, self.reception)
+        self.assertTrue(
+            execution.eventos.filter(
+                agente="checkpoint_humano",
+                estado=EventoAgente.Estado.ESPERANDO_HUMANO,
+            ).exists()
+        )
+        registrar_decision(execution, self.reception, "CONTINUAR", "Revisado.")
+        self.assertTrue(
+            execution.eventos.filter(
+                agente="checkpoint_humano",
+                estado=EventoAgente.Estado.REANUDADO,
+            ).exists()
+        )
+        self.assertTrue(
+            execution.eventos.filter(agente="negociacion").exists()
+        )
+
+    @override_settings(LANGGRAPH_VISUALIZER_ENABLED=True)
+    def test_architecture_endpoint_is_authenticated_and_real(self):
+        url = reverse("agent_flow_architecture_api")
+        self.assertEqual(HttpClient().get(url).status_code, 302)
+        client = HttpClient()
+        client.force_login(self.reception)
+        response = client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("supervisor", {node["id"] for node in response.json()["nodes"]})
+
+    @override_settings(LANGGRAPH_VISUALIZER_ENABLED=True)
+    @patch("credit_notes.agents.preparar_evidencia")
+    def test_execution_endpoints_are_ordered_and_isolated_by_note(self, mocked_rag):
+        mocked_rag.return_value = self._rag_result()
+        execution, _ = iniciar_analisis(self.note, self.reception)
+        other_note = NotaCredito.objects.create(
+            numero_titulo="SIM-OTHER-001",
+            cliente_vendedor=self.seller,
+            tipo_nota=NotaCredito.TipoNota.ISD,
+            origen_tributario=NotaCredito.OrigenTributario.DEVOLUCION_ISD,
+            valor_nominal=Decimal("500.00"),
+            saldo_disponible=Decimal("450.00"),
+            minimo_recibir=Decimal("400.00"),
+            fecha_emision=date.today(),
+            recepcionista=self.reception,
+        )
+        EjecucionAgente.objects.create(nota=other_note, operador=self.reception)
+        client = HttpClient()
+        client.force_login(self.reception)
+        listed = client.get(reverse("agent_flow_executions_api", args=[self.note.pk])).json()
+        self.assertEqual([item["id"] for item in listed["executions"]], [str(execution.pk)])
+        detail = client.get(reverse("agent_flow_execution_api", args=[execution.pk]))
+        self.assertEqual(detail.status_code, 200)
+        orders = [item["order"] for item in detail.json()["events"]]
+        self.assertEqual(orders, sorted(orders))
+
+    @override_settings(LANGGRAPH_VISUALIZER_ENABLED=True)
+    def test_execution_endpoint_handles_missing_execution(self):
+        import uuid
+
+        client = HttpClient()
+        client.force_login(self.reception)
+        response = client.get(reverse("agent_flow_execution_api", args=[uuid.uuid4()]))
+        self.assertEqual(response.status_code, 404)
+
+    @override_settings(LANGGRAPH_VISUALIZER_ENABLED=False)
+    def test_visualizer_disabled_hides_ui_and_endpoints(self):
+        client = HttpClient()
+        client.force_login(self.reception)
+        detail = client.get(reverse("nota_detail", args=[self.note.pk]))
+        self.assertNotContains(detail, "Flujo agéntico")
+        self.assertEqual(client.get(reverse("agent_flow_architecture_api")).status_code, 404)
+
+    @override_settings(LANGGRAPH_VISUALIZER_ENABLED=True)
+    def test_visualizer_enabled_renders_accessible_tab(self):
+        client = HttpClient()
+        client.force_login(self.reception)
+        detail = client.get(reverse("nota_detail", args=[self.note.pk]))
+        self.assertContains(detail, "Flujo agéntico")
+        self.assertContains(detail, 'aria-label="Grafo interactivo de LangGraph"')
+        self.assertContains(detail, "Alternativa textual del grafo")
+
+    @override_settings(LANGGRAPH_VISUALIZER_ENABLED=True)
+    def test_replay_endpoint_does_not_call_external_services(self):
+        execution = EjecucionAgente.objects.create(
+            nota=self.note,
+            operador=self.reception,
+            estado=EjecucionAgente.Estado.COMPLETADA,
+            finalizada_en=timezone.now(),
+        )
+        EventoAgente.objects.create(
+            ejecucion=execution,
+            agente="supervisor",
+            estado=EventoAgente.Estado.COMPLETADO,
+            resumen="Ruta registrada.",
+            orden=1,
+        )
+        client = HttpClient()
+        client.force_login(self.reception)
+        with patch("credit_notes.agents.preparar_evidencia") as external:
+            response = client.get(reverse("agent_flow_execution_api", args=[execution.pk]))
+        self.assertEqual(response.status_code, 200)
+        external.assert_not_called()
 
     @patch("credit_notes.views.generar_explicacion_validacion")
     def test_validation_explanation_can_retry_without_repeating_rules(self, mocked_explanation):

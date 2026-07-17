@@ -1,8 +1,9 @@
 # CrediTrade
 
 > La arquitectura de agentes, memoria, RAG, checkpoints y despliegue esta documentada en
-> [`docs/ARQUITECTURA_AGENTICA.md`](docs/ARQUITECTURA_AGENTICA.md) y
-> [`docs/OPTIMIZACION_GEMINI.md`](docs/OPTIMIZACION_GEMINI.md).
+> [`docs/ARQUITECTURA_AGENTICA.md`](docs/ARQUITECTURA_AGENTICA.md),
+> [`docs/OPTIMIZACION_GEMINI.md`](docs/OPTIMIZACION_GEMINI.md) y
+> [`docs/VISUALIZADOR_LANGGRAPH.md`](docs/VISUALIZADOR_LANGGRAPH.md).
 
 ## Asistencia inteligente para el ingreso y negociación de notas de crédito tributarias en Ecuador
 

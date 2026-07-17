@@ -16,6 +16,14 @@ from .models import (
 )
 from .rag import RAGServiceError, preparar_evidencia
 from .services import _campos_faltantes, _duplicados, registrar_evento
+from .graph_catalog import runtime_node_ids
+from .graph_observability import (
+    capture_node_summary,
+    instrument_node,
+    record_execution_event,
+    sanitize_graph_state,
+    visualizer_enabled,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -53,11 +61,14 @@ def _json(value):
 
 
 def _evento(state, agente, resumen, estado=EventoAgente.Estado.COMPLETADO, **meta):
-    EventoAgente.objects.create(
-        ejecucion_id=state["ejecucion_id"],
-        agente=agente,
-        estado=estado,
-        resumen=resumen,
+    if visualizer_enabled():
+        capture_node_summary(resumen, estado, **meta)
+        return
+    record_execution_event(
+        state["ejecucion_id"],
+        agente,
+        estado,
+        resumen,
         metadatos=meta,
     )
 
@@ -106,8 +117,8 @@ def agente_documental(state: EstadoCrediTrade):
     ]
     documento_texto = "documento" if len(documentos) == 1 else "documentos"
     faltante_texto = "faltante" if len(faltantes) == 1 else "faltantes"
-    _evento(state, "ingreso_documental", f"{len(documentos)} {documento_texto} y {len(faltantes)} {faltante_texto} revisados.")
-    return {**_nodo(state, "ingreso_documental"), "documentos": documentos, "sugerencias": sugerencias}
+    _evento(state, "documental", f"{len(documentos)} {documento_texto} y {len(faltantes)} {faltante_texto} revisados.")
+    return {**_nodo(state, "documental"), "documentos": documentos, "sugerencias": sugerencias}
 
 
 def agente_rag(state: EstadoCrediTrade):
@@ -127,9 +138,9 @@ def agente_rag(state: EstadoCrediTrade):
         fragmentos = []
         errores = [*state.get("errores_controlados", []), "La evidencia semantica no estuvo disponible; los datos permanecen guardados."]
         respuesta = {"conclusion": "No fue posible recuperar evidencia semantica en este momento.", "evidencia": [], "fuentes": [], "confianza": 0, "advertencias": ["Reintente el analisis."], "siguiente_accion": "Reintentar sin modificar el expediente."}
-    _evento(state, "antecedentes_rag", respuesta["conclusion"], fuentes=len(respuesta["fuentes"]))
+    _evento(state, "rag", respuesta["conclusion"], fuentes=len(respuesta["fuentes"]))
     return {
-        **_nodo(state, "antecedentes_rag"),
+        **_nodo(state, "rag"),
         "fragmentos_recuperados": fragmentos,
         "antecedentes": respuesta["fuentes"],
         "errores_controlados": errores,
@@ -148,8 +159,8 @@ def agente_validacion(state: EstadoCrediTrade):
         hallazgos.append({"severidad": "critico", "tipo": "bloqueo", "detalle": note.motivo_bloqueo or "Titulo bloqueado", "por_que_importa": "No debe avanzar sin revision humana."})
     if note.saldo_disponible < note.valor_nominal:
         hallazgos.append({"severidad": "informativo", "tipo": "saldo", "detalle": f"Diferencia: {note.valor_nominal - note.saldo_disponible}", "por_que_importa": "Delimita el valor efectivamente negociable."})
-    _evento(state, "validacion_riesgos", f"{len(hallazgos)} hallazgos clasificados.")
-    return {**_nodo(state, "validacion_riesgos"), "hallazgos": hallazgos, "riesgos": [h for h in hallazgos if h["severidad"] in {"critico", "alto"}], "acciones_recomendadas": ["Revisar evidencia y decidir como operador responsable."]}
+    _evento(state, "validacion", f"{len(hallazgos)} hallazgos clasificados.")
+    return {**_nodo(state, "validacion"), "hallazgos": hallazgos, "riesgos": [h for h in hallazgos if h["severidad"] in {"critico", "alto"}], "acciones_recomendadas": ["Revisar evidencia y decidir como operador responsable."]}
 
 
 def agente_negociacion(state: EstadoCrediTrade):
@@ -179,7 +190,13 @@ def agente_explicacion(state: EstadoCrediTrade):
 
 def checkpoint_humano(state: EstadoCrediTrade):
     pendiente = state.get("nodo_pendiente") or "revision_operador"
-    _evento(state, "supervisor", "Flujo detenido para decision humana.", pendiente=pendiente)
+    _evento(
+        state,
+        "checkpoint_humano",
+        "Flujo detenido para decisión humana.",
+        estado=EventoAgente.Estado.ESPERANDO_HUMANO,
+        pendiente=pendiente,
+    )
     return {**_nodo(state, "checkpoint_humano"), "nodo_pendiente": pendiente}
 
 
@@ -189,13 +206,17 @@ def _ruta_supervisor(state):
 
 def construir_grafo():
     grafo = StateGraph(EstadoCrediTrade)
-    grafo.add_node("supervisor", supervisor)
-    grafo.add_node("documental", agente_documental)
-    grafo.add_node("rag", agente_rag)
-    grafo.add_node("validacion", agente_validacion)
-    grafo.add_node("negociacion", agente_negociacion)
-    grafo.add_node("explicacion", agente_explicacion)
-    grafo.add_node("checkpoint_humano", checkpoint_humano)
+    handlers = {
+        "supervisor": supervisor,
+        "documental": agente_documental,
+        "rag": agente_rag,
+        "validacion": agente_validacion,
+        "negociacion": agente_negociacion,
+        "explicacion": agente_explicacion,
+        "checkpoint_humano": checkpoint_humano,
+    }
+    for node_id in runtime_node_ids():
+        grafo.add_node(node_id, instrument_node(node_id, handlers[node_id]))
     grafo.set_entry_point("supervisor")
     grafo.add_conditional_edges("supervisor", _ruta_supervisor, {"documental": "documental", "negociacion": "negociacion", "fin": END})
     grafo.add_edge("documental", "rag")
@@ -296,6 +317,24 @@ def registrar_decision(ejecucion, operador, decision, observacion=""):
             "decision_requerida": "Decision registrada; no hay una revision pendiente en esta ejecucion.",
         }
     estado["resultado_final"] = resultado
+    decision_status = (
+        EventoAgente.Estado.REANUDADO
+        if decision == "CONTINUAR"
+        else EventoAgente.Estado.CANCELADO
+        if decision in {"RECHAZAR", "EDITAR"}
+        else EventoAgente.Estado.COMPLETADO
+    )
+    if visualizer_enabled():
+        record_execution_event(
+            ejecucion.pk,
+            "checkpoint_humano",
+            decision_status,
+            f"El operador registró la decisión {decision.lower().replace('_', ' ')}.",
+            salida=sanitize_graph_state(estado),
+            transicion=decision,
+            finalizada_en=timezone.now(),
+            metadatos={"operador_id": operador.pk},
+        )
     ejecucion.estado_compartido = estado
     if decision == "NUEVO_ANALISIS":
         ejecucion.estado = EjecucionAgente.Estado.COMPLETADA

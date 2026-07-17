@@ -1,0 +1,65 @@
+<div
+  id="agentFlowVisualizer"
+  class="agent-flow"
+  data-architecture-url="{% url 'agent_flow_architecture_api' %}"
+  data-executions-url="{% url 'agent_flow_executions_api' nota.pk %}"
+>
+  <div class="section-heading agent-flow-heading">
+    <div><span class="section-kicker">Observabilidad sanitizada</span><h2>Visualizador de flujo agéntico</h2><p>Explora la arquitectura real o reproduce una ejecución registrada.</p></div>
+    <div class="agent-flow-actions" role="group" aria-label="Modo del visualizador">
+      <button class="btn btn-primary btn-sm" type="button" data-flow-mode="architecture">Arquitectura</button>
+      <button class="btn btn-outline-primary btn-sm" type="button" data-flow-mode="execution">Ejecución</button>
+      <button class="btn btn-outline-secondary btn-sm" type="button" data-flow-refresh aria-label="Actualizar visualizador"><i class="bi bi-arrow-clockwise"></i> Actualizar</button>
+    </div>
+  </div>
+
+  <div class="soft-card section-card agent-flow-toolbar">
+    <label for="agentFlowExecution">Ejecución registrada</label>
+    <select id="agentFlowExecution" class="form-select form-select-sm" data-flow-execution disabled><option value="">Cargando ejecuciones…</option></select>
+    <div class="agent-flow-summary" aria-live="polite">
+      <span><small>Estado</small><strong data-flow-summary="status">Arquitectura</strong></span>
+      <span><small>Operador</small><strong data-flow-summary="operator">—</strong></span>
+      <span><small>Etapa</small><strong data-flow-summary="stage">Flujo general</strong></span>
+      <span><small>Duración</small><strong data-flow-summary="duration">—</strong></span>
+    </div>
+  </div>
+
+  <div class="agent-flow-grid mt-3">
+    <section class="soft-card agent-flow-canvas-card" aria-labelledby="agentFlowGraphTitle">
+      <div class="agent-flow-card-head">
+        <div><h3 id="agentFlowGraphTitle">Grafo dirigido</h3><p>Selecciona un nodo para conocer su función y resultados.</p></div>
+        <div class="agent-flow-graph-controls" aria-label="Controles del gráfico">
+          <button type="button" data-flow-zoom="in" aria-label="Acercar">+</button>
+          <button type="button" data-flow-zoom="out" aria-label="Alejar">−</button>
+          <button type="button" data-flow-fit aria-label="Ajustar a pantalla"><i class="bi bi-arrows-fullscreen"></i></button>
+          <button type="button" data-flow-export aria-label="Exportar SVG"><i class="bi bi-download"></i></button>
+        </div>
+      </div>
+      <div class="agent-flow-canvas" data-flow-canvas tabindex="0" aria-label="Grafo interactivo de LangGraph">
+        <svg data-flow-svg role="img" aria-labelledby="agentFlowGraphTitle"><defs><marker id="agentFlowArrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z"></path></marker></defs><g data-flow-edges></g><g data-flow-nodes></g></svg>
+      </div>
+      <div class="agent-flow-legend" data-flow-legend aria-label="Leyenda de estados"></div>
+      <details class="agent-flow-textual"><summary>Alternativa textual del grafo</summary><ol data-flow-text-list></ol></details>
+    </section>
+
+    <aside class="soft-card agent-flow-detail" aria-live="polite" aria-label="Detalle del nodo seleccionado">
+      <div data-flow-detail-empty><i class="bi bi-diagram-3"></i><h3>Selecciona un nodo</h3><p>Aquí verás su objetivo, datos recibidos, resultados, evidencias y cambios.</p></div>
+      <div data-flow-detail hidden>
+        <span class="status-pill" data-flow-detail-status></span>
+        <h3 data-flow-detail-title></h3>
+        <p data-flow-detail-purpose></p>
+        <dl class="agent-flow-detail-meta"><dt>Responsable</dt><dd data-flow-detail-owner></dd><dt>Pregunta</dt><dd data-flow-detail-question></dd><dt>Duración</dt><dd data-flow-detail-duration></dd></dl>
+        <div class="agent-flow-detail-section"><h4>Entrada resumida</h4><div data-flow-detail-input></div></div>
+        <div class="agent-flow-detail-section"><h4>Salida resumida</h4><div data-flow-detail-output></div></div>
+        <div class="agent-flow-detail-section"><h4>Cambios del estado</h4><div data-flow-detail-changes></div></div>
+        <div class="agent-flow-detail-section"><h4>Evidencias</h4><div data-flow-detail-sources></div></div>
+      </div>
+    </aside>
+  </div>
+
+  <section class="soft-card section-card agent-flow-timeline mt-3" aria-labelledby="agentFlowTimelineTitle">
+    <div class="agent-flow-card-head"><div><h3 id="agentFlowTimelineTitle">Recorrido de la ejecución</h3><p>La reproducción usa eventos persistidos; no vuelve a ejecutar agentes.</p></div><div class="agent-flow-playback" role="group" aria-label="Controles de reproducción"><button type="button" data-flow-step="first" aria-label="Inicio"><i class="bi bi-skip-backward-fill"></i></button><button type="button" data-flow-step="previous" aria-label="Anterior"><i class="bi bi-caret-left-fill"></i></button><button type="button" data-flow-play aria-label="Reproducir"><i class="bi bi-play-fill"></i></button><button type="button" data-flow-step="next" aria-label="Siguiente"><i class="bi bi-caret-right-fill"></i></button><button type="button" data-flow-step="last" aria-label="Final"><i class="bi bi-skip-forward-fill"></i></button><select data-flow-speed aria-label="Velocidad de reproducción"><option value="1400">1×</option><option value="700">2×</option><option value="2800">0.5×</option></select></div></div>
+    <ol class="agent-flow-events" data-flow-events><li class="text-muted">Selecciona una ejecución para ver sus eventos.</li></ol>
+  </section>
+  <div class="alert alert-warning mt-3 mb-0" data-flow-error hidden>No fue posible actualizar el flujo en este momento. La ejecución continúa y puedes volver a intentarlo.</div>
+</div>

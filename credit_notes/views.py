@@ -23,6 +23,8 @@ from .ai_services import (
 from .gemini_service import user_message as gemini_user_message
 from .decorators import role_required
 from .agents import iniciar_analisis, registrar_decision
+from .graph_catalog import graph_structure
+from .graph_serializers import VISUAL_STATES, serialize_execution, serialize_execution_summary
 from .forms import (
     ClienteForm,
     ConfirmacionPublicaForm,
@@ -343,8 +345,62 @@ def nota_detail(request, pk):
                 and execution.estado == EjecucionAgente.Estado.ESPERANDO_HUMANO
                 else None
             ),
+            "langgraph_visualizer_enabled": settings.LANGGRAPH_VISUALIZER_ENABLED,
         },
     )
+
+
+def _require_visualizer():
+    if not settings.LANGGRAPH_VISUALIZER_ENABLED:
+        raise Http404
+
+
+@login_required
+@require_GET
+def agent_flow_architecture_api(request):
+    _require_visualizer()
+    if not request.user.activo_operativamente:
+        raise Http404
+    structure = graph_structure()
+    return JsonResponse(
+        {
+            **structure,
+            "states": VISUAL_STATES,
+            "nodes": [
+                {**node, "status": "pending", "status_meta": VISUAL_STATES["pending"]}
+                for node in structure["nodes"]
+            ],
+        }
+    )
+
+
+@login_required
+@require_GET
+def agent_flow_executions_api(request, pk):
+    _require_visualizer()
+    note = _get_note_for_user(request.user, pk)
+    executions = (
+        note.ejecuciones_agentes.select_related("nota", "operador")
+        .order_by("-iniciada_en")[:25]
+    )
+    return JsonResponse(
+        {"executions": [serialize_execution_summary(item) for item in executions]}
+    )
+
+
+@login_required
+@require_GET
+def agent_flow_execution_api(request, execution_id):
+    _require_visualizer()
+    execution = get_object_or_404(
+        EjecucionAgente.objects.select_related("nota", "operador").prefetch_related(
+            "eventos"
+        ),
+        pk=execution_id,
+        nota__eliminado_en__isnull=True,
+    )
+    _get_note_for_user(request.user, execution.nota_id)
+    return JsonResponse(serialize_execution(execution, technical=request.user.is_superuser))
 
 
 @login_required
