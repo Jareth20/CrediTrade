@@ -1,16 +1,24 @@
 import json
 import logging
+
 from decimal import Decimal
-from typing import List
+from typing import List, Literal
 
 from django.conf import settings
 from django.db import transaction
+from pydantic import BaseModel
+
 from .gemini_service import (
-    GeminiAuthorizationError,
+    GeminiInvalidResponseError,
+    GeminiQuotaExceededError,
+    GeminiRateLimitError,
     GeminiServiceError,
+    GeminiTimeoutError,
+    GeminiUnavailableError,
     call_structured,
     classify_error,
     get_profile,
+    user_message,
 )
 from .models import NotaCredito, ReporteIA, SugerenciaIA
 from .services import registrar_evento
@@ -40,7 +48,7 @@ def _call_gemini(prompt, schema_model, **kwargs):
 
 def _require_ai_authorization(nota):
     if not nota.cliente_vendedor.autorizacion_consulta:
-        raise GeminiAuthorizationError(
+        raise GeminiServiceError(
             "El titular no ha autorizado el procesamiento de sus datos con IA."
         )
 
@@ -87,37 +95,34 @@ def generar_sugerencias_nota(nota, operador):
 
     class SuggestedField(BaseModel):
         campo: str = Field(
-            description=(
-                "Nombre exacto del campo sugerido. Valores permitidos: "
-                "tipo_nota, origen_tributario, valor_nominal, "
-                "saldo_disponible, minimo_recibir, fecha_emision "
-                "o estado_fuente."
-            )
+        description=(
+            "Nombre exacto del campo sugerido. Valores permitidos: "
+            "tipo_nota, origen_tributario, valor_nominal, "
+            "saldo_disponible, minimo_recibir, fecha_emision "
+            "o estado_fuente."
         )
-        valor_sugerido: str = Field(
-            min_length=1,
-            description="Valor sugerido expresado como texto.",
-        )
-        confianza: float = Field(
-            default=0.70,
-            ge=0,
-            le=1,
-            description="Confianza entre 0 y 1.",
-        )
-        fuente: str = Field(
-            min_length=1,
-            description="Antecedente o documento utilizado.",
-        )
-        evidencia: str = Field(
-            min_length=1,
-            description="Explicación breve de la evidencia encontrada.",
-        )
+    )
+    valor_sugerido: str = Field(
+        description="Valor sugerido expresado como texto."
+    )
+    confianza: float = Field(
+        default=0.70,
+        ge=0,
+        le=1,
+        description="Confianza entre 0 y 1.",
+    )
+    fuente: str = Field(
+        description="Antecedente o documento utilizado."
+    )
+    evidencia: str = Field(
+        description="Explicación breve de la evidencia encontrada."
+    )
 
 
     class SuggestionBundle(BaseModel):
         sugerencias: list[SuggestedField] = Field(
-            default_factory=list
-        )
+        default_factory=list
+    )
 
     payload = {
         "actual": _serialize_note(nota),

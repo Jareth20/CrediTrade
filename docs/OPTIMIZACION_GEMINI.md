@@ -1,3 +1,4 @@
+
 # Optimización y resiliencia de Gemini
 
 ## Diagnóstico
@@ -98,9 +99,6 @@ AI_OPERATION_LOCK_SECONDS=300
 RAG_TOP_K=4
 RAG_MIN_RELEVANCE=0.20
 RAG_MAX_CONTEXT_CHARS=4000
-RAG_MAX_DOCUMENTS=12
-RAG_MAX_CHUNKS_PER_DOCUMENT=12
-RAG_MAX_EMBEDDING_BATCH=48
 ```
 
 No se modificó `.env` ni se añadieron secretos.
