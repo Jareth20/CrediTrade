@@ -1,31 +1,62 @@
+# Python
 __pycache__/
 *.py[cod]
-*.sqlite3
-
-# Variables privadas
-/.env
-/.env.example
-/.env.local
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
 
 # Entornos virtuales
-/.venv/
-/venv/
+.venv/
+venv/
+env/
 
-# Archivos generados
-/staticfiles/
-/media/
-/.pytest_cache/
-/.coverage
-/.DS_Store
-/.vercel/
+# Variables de entorno y secretos (incluye archivos de ejemplo locales)
+.env
+.env.*
+*.env
+*.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+**/credentials*.json
+**/*secret*.json
+**/service-account*.json
 
-# Documentos solo locales
+# Bases, respaldos y registros locales
+*.sqlite3
+*.sqlite3-*
+*.sql
+*.dump
+*.backup
+*.log
+logs/
+
+# Archivos generados o cargados
+staticfiles/
+media/
+
+# Configuracion local de herramientas y editores
+.vercel/
+.vscode/
+.idea/
+*.code-workspace
+.DS_Store
+Thumbs.db
+
+# Documentacion operativa solo local; README.md es la guia publica unica
 /CHANGELOG.md
 /SECURITY_NOTICE.md
-/docs/DESPLIEGUE_VERCEL.md
-/docs/ESCALABILIDAD.md
+/PROJECT_MANIFEST.txt
+/docs/*.md
+/docs/**/*.md
 
-# Scripts solo locales
+# Scripts locales que pueden leer o transferir credenciales
 /configurar_local.cmd
 /configurar_vercel.cmd
 /configurar_vercel.ps1
