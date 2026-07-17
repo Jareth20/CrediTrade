@@ -9,80 +9,13 @@
 <link rel="icon" type="image/png" href="{% static 'img/favicon.png' %}?v=1">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-  <link rel="stylesheet" href="{% static 'css/styles.css' %}">
+  <link rel="stylesheet" href="{% static 'css/styles.css' %}?v=20260716-6">
   {% block extra_head %}{% endblock %}
-  <style>
-    :root {
-        --creditrade-navy: #05285F;
-        --creditrade-blue: #025EF2;
-    }
-
-    .brand-link {
-        text-decoration: none;
-    }
-
-    .brand-logo {
-        width: 42px;
-        height: 42px;
-        object-fit: contain;
-        border-radius: 10px;
-        background-color: #ffffff;
-    }
-
-    .brand-name {
-        font-size: 1.55rem;
-        font-weight: 800;
-        letter-spacing: -0.5px;
-        line-height: 1;
-    }
-
-    .brand-credit {
-        color: var(--creditrade-navy);
-    }
-
-    .brand-trade {
-        color: var(--creditrade-blue);
-    }
-
-    .navbar .nav-link {
-        color: var(--creditrade-navy);
-        font-weight: 600;
-        transition:
-            color 0.18s ease,
-            background-color 0.18s ease;
-    }
-
-    .navbar .nav-link:hover,
-    .navbar .nav-link:focus,
-    .navbar .nav-link.active {
-        color: var(--creditrade-blue);
-    }
-
-    .navbar .dropdown-toggle {
-        color: var(--creditrade-navy);
-    }
-
-    .navbar .dropdown-toggle:hover,
-    .navbar .dropdown-toggle:focus {
-        color: var(--creditrade-blue);
-    }
-
-    @media (max-width: 576px) {
-        .brand-logo {
-            width: 36px;
-            height: 36px;
-        }
-
-        .brand-name {
-            font-size: 1.3rem;
-        }
-    }
-</style>
 </head>
 <body>
-<div id="operationOverlay" class="operation-overlay" aria-hidden="true" aria-live="polite"><div class="operation-panel"><div class="operation-spinner"></div><h2>Estamos procesando tu solicitud</h2><p id="operationMessage">Todo va bien. Estamos validando la información de forma segura; por favor, espera un momento.</p></div></div>
+<div id="operationOverlay" class="operation-overlay" aria-hidden="true" aria-live="polite"><div class="operation-panel"><div class="operation-spinner"></div><h2 id="operationTitle">Procesando operación</h2><p id="operationMessage"></p></div></div>
 {% if user.is_authenticated %}
-<nav class="navbar navbar-expand-lg navbar-light app-navbar sticky-top">
+<nav class="navbar navbar-expand-lg navbar-light app-navbar sticky-top" aria-label="Navegación principal">
   <div class="container-fluid px-lg-4">
 <a class="navbar-brand brand-link d-flex align-items-center gap-2"
    href="{% url 'dashboard' %}">
@@ -91,6 +24,8 @@
         src="{% static 'img/creditrade-logo-v2.jpeg' %}?v=2"
         alt="Logo de CrediTrade"
         class="brand-logo"
+        width="42"
+        height="42"
     >
 
     <span class="brand-name">
@@ -101,28 +36,45 @@
       <span class="navbar-toggler-icon"></span>
     </button>
     <div class="collapse navbar-collapse" id="mainNav">
-      <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-        <li class="nav-item"><a class="nav-link" href="{% url 'nota_list' %}"><i class="bi bi-folder2-open me-1"></i>Expedientes</a></li>
-        <li class="nav-item"><a class="nav-link" href="{% url 'cliente_list' %}"><i class="bi bi-people me-1"></i>Clientes</a></li>
+      {% with current=request.resolver_match.url_name %}
+      <ul class="navbar-nav app-nav-links me-auto mb-3 mb-lg-0">
+        <li class="nav-item"><a class="nav-link {% if current == 'dashboard' %}active{% endif %}" href="{% url 'dashboard' %}" {% if current == 'dashboard' %}aria-current="page"{% endif %}><i class="bi bi-grid-1x2 me-1"></i>Inicio</a></li>
+        <li class="nav-item"><a class="nav-link {% if 'nota' in current or current == 'suggestion_review' %}active{% endif %}" href="{% url 'nota_list' %}"><i class="bi bi-folder2-open me-1"></i>Expedientes</a></li>
+        <li class="nav-item"><a class="nav-link {% if 'cliente' in current %}active{% endif %}" href="{% url 'cliente_list' %}"><i class="bi bi-people me-1"></i>Clientes</a></li>
         {% if user.es_recepcionista or user.is_superuser %}
-        <li class="nav-item"><a class="nav-link" href="{% url 'antecedentes' %}"><i class="bi bi-search me-1"></i>Antecedentes</a></li>
+        <li class="nav-item"><a class="nav-link {% if current == 'antecedentes' %}active{% endif %}" href="{% url 'antecedentes' %}"><i class="bi bi-search me-1"></i>Antecedentes</a></li>
         {% endif %}
         {% if user.es_contador or user.is_superuser %}
-        <li class="nav-item"><a class="nav-link" href="{% url 'validation_queue' %}"><i class="bi bi-shield-check me-1"></i>Validación</a></li>
+        <li class="nav-item"><a class="nav-link {% if 'validation' in current %}active{% endif %}" href="{% url 'validation_queue' %}"><i class="bi bi-shield-check me-1"></i>Validación</a></li>
         {% endif %}
         {% if user.es_vendedor or user.is_superuser %}
-        <li class="nav-item"><a class="nav-link" href="{% url 'negotiation_queue' %}"><i class="bi bi-briefcase me-1"></i>Negociación</a></li>
+        <li class="nav-item"><a class="nav-link {% if 'negotiation' in current or 'report' in current or 'approval' in current %}active{% endif %}" href="{% url 'negotiation_queue' %}"><i class="bi bi-briefcase me-1"></i>Negociación</a></li>
         {% endif %}
       </ul>
-      <div class="d-flex align-items-center gap-3">
-        <div class="text-end d-none d-md-block">
-          <div class="small fw-semibold">{{ user.get_full_name|default:user.username }}</div>
-          <div class="text-muted tiny">{{ user.rol_nombre }}</div>
+      {% endwith %}
+      <div class="dropdown operator-menu">
+        <button class="operator-trigger" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Abrir menú de cuenta">
+          <span class="operator-avatar"><i class="bi bi-person"></i></span>
+          <span class="operator-meta text-start">
+            <strong>{{ user.get_full_name|default:user.username }}</strong>
+            <small>{{ user.rol_nombre }}</small>
+          </span>
+          <i class="bi bi-chevron-down operator-chevron"></i>
+        </button>
+        <div class="dropdown-menu dropdown-menu-end account-dropdown">
+          <div class="account-summary">
+            <strong>{{ user.get_full_name|default:user.username }}</strong>
+            <span>{{ user.rol_nombre }}</span>
+          </div>
+          <div class="dropdown-divider"></div>
+          <a class="dropdown-item" href="{% url 'dashboard' %}"><i class="bi bi-grid-1x2"></i>Panel operativo</a>
+          <a class="dropdown-item" href="{% url 'nota_list' %}"><i class="bi bi-folder2-open"></i>Mis expedientes</a>
+          <div class="dropdown-divider"></div>
+          <form method="post" action="{% url 'accounts:logout' %}">
+            {% csrf_token %}
+            <button class="dropdown-item text-danger" type="submit"><i class="bi bi-box-arrow-right"></i>Cerrar sesión</button>
+          </form>
         </div>
-        <form method="post" action="{% url 'accounts:logout' %}">
-          {% csrf_token %}
-          <button class="btn btn-sm btn-outline-secondary" type="submit"><i class="bi bi-box-arrow-right"></i></button>
-        </form>
       </div>
     </div>
   </div>
@@ -150,13 +102,38 @@
 <script>
 document.addEventListener('submit', function (event) {
   const form = event.target;
-  if (form.method.toLowerCase() !== 'post' || !form.checkValidity() || form.dataset.noLoading === 'true') return;
+  if (form.dataset.loading !== 'true') return;
+  if (form.dataset.submitting === 'true') { event.preventDefault(); return; }
+  if (form.method.toLowerCase() !== 'post' || !form.checkValidity()) return;
+  form.dataset.submitting = 'true';
   const overlay = document.getElementById('operationOverlay');
-  document.getElementById('operationMessage').textContent = form.dataset.loadingMessage || 'Todo va bien. Estamos procesando la información de forma segura; por favor, espera un momento.';
+  document.getElementById('operationTitle').textContent = form.dataset.loadingTitle;
+  document.getElementById('operationMessage').textContent = form.dataset.loadingMessage;
   overlay.classList.add('is-visible'); overlay.setAttribute('aria-hidden', 'false'); document.body.classList.add('operation-locked');
-  form.querySelectorAll('button, input[type="submit"]').forEach(el => el.disabled = true);
+  form.querySelectorAll('button, input[type="submit"]').forEach(function (el) {
+    el.dataset.operationOriginalDisabled = el.disabled ? 'true' : 'false';
+    if (el.tagName === 'BUTTON') {
+      el.dataset.operationOriginalHtml = el.innerHTML;
+      el.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>' + (form.dataset.loadingLabel || 'Procesando…');
+    }
+    el.disabled = true;
+  });
 });
-window.addEventListener('pageshow', function () { document.getElementById('operationOverlay')?.classList.remove('is-visible'); document.body.classList.remove('operation-locked'); });
+window.addEventListener('pageshow', function () {
+  const overlay = document.getElementById('operationOverlay');
+  overlay?.classList.remove('is-visible');
+  overlay?.setAttribute('aria-hidden', 'true');
+  document.body.classList.remove('operation-locked');
+  document.querySelectorAll('form[data-submitting="true"]').forEach(function (form) {
+    delete form.dataset.submitting;
+    form.querySelectorAll('[data-operation-original-disabled]').forEach(function (el) {
+      el.disabled = el.dataset.operationOriginalDisabled === 'true';
+      if (el.dataset.operationOriginalHtml) el.innerHTML = el.dataset.operationOriginalHtml;
+      delete el.dataset.operationOriginalDisabled;
+      delete el.dataset.operationOriginalHtml;
+    });
+  });
+});
 </script>
 {% block extra_js %}{% endblock %}
 </body>

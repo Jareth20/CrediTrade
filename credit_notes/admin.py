@@ -11,6 +11,10 @@ from .models import (
     SolicitudAprobacion,
     SugerenciaIA,
     ValidacionNota,
+    EjecucionAgente,
+    EventoAgente,
+    MemoriaAgente,
+    FragmentoDocumento,
 )
 
 
@@ -78,7 +82,19 @@ class RegistroSimuladoTituloAdmin(admin.ModelAdmin):
 class ValidacionNotaAdmin(admin.ModelAdmin):
     list_display = ("nota", "fuente", "resultado", "existe", "bloqueada", "realizada_en")
     list_filter = ("fuente", "resultado", "existe", "bloqueada")
-    readonly_fields = ("realizada_en",)
+    readonly_fields = (
+        "id", "nota", "fuente", "existe", "saldo_fuente", "estado_fuente",
+        "bloqueada", "motivo_bloqueo", "campos_faltantes", "inconsistencias",
+        "duplicados", "coincidencias_riesgo", "siguiente_accion",
+        "explicacion_ia", "resultado", "realizada_por", "realizada_en",
+        "actualizado_en", "eliminado_en", "eliminado_por", "motivo_eliminacion",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 admin.site.register(SugerenciaIA)
@@ -86,3 +102,7 @@ admin.site.register(OrdenNegociacion)
 admin.site.register(ReporteIA)
 admin.site.register(SolicitudAprobacion)
 admin.site.register(EventoTrazabilidad)
+admin.site.register(EjecucionAgente)
+admin.site.register(EventoAgente)
+admin.site.register(MemoriaAgente)
+admin.site.register(FragmentoDocumento)
