@@ -1,10 +1,10 @@
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Literal, TypedDict
 
 from django.conf import settings
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from langgraph.graph import END, StateGraph
 
@@ -112,17 +112,14 @@ def agente_documental(state: EstadoCrediTrade):
 
 def agente_rag(state: EstadoCrediTrade):
     note = NotaCredito.objects.select_related("cliente_vendedor").get(pk=state["nota_id"])
-    respuesta = None
-    for intento in range(settings.AGENT_MAX_RETRIES + 1):
-        try:
-            respuesta = preparar_evidencia(note)
-            break
-        except RAGServiceError:
-            logger.exception(
-                "RAG no disponible para ejecucion %s, intento %s",
-                state["ejecucion_id"],
-                intento + 1,
-            )
+    try:
+        respuesta = preparar_evidencia(note)
+    except RAGServiceError:
+        respuesta = None
+        logger.exception(
+            "RAG no disponible para ejecucion %s; el servicio central controla los reintentos",
+            state["ejecucion_id"],
+        )
     if respuesta is not None:
         fragmentos = respuesta["evidencia"]
         errores = state.get("errores_controlados", [])
@@ -217,19 +214,48 @@ def _roles(operador):
     return [nombre for permitido, nombre in ((operador.tiene_rol(1), "recepcion"), (operador.tiene_rol(2), "validacion"), (operador.tiene_rol(3), "negociacion")) if permitido]
 
 
-@transaction.atomic
 def iniciar_analisis(nota, operador):
-    activa = EjecucionAgente.objects.select_for_update().filter(
-        nota=nota,
-        operador=operador,
-        estado__in=[
-            EjecucionAgente.Estado.EJECUTANDO,
-            EjecucionAgente.Estado.ESPERANDO_HUMANO,
-        ],
-    ).first()
-    if activa:
-        return activa, False
-    ejecucion = EjecucionAgente.objects.create(nota=nota, operador=operador)
+    with transaction.atomic():
+        cutoff = timezone.now() - timedelta(seconds=settings.AI_OPERATION_LOCK_SECONDS)
+        EjecucionAgente.objects.filter(
+            nota=nota,
+            operador=operador,
+            estado=EjecucionAgente.Estado.EJECUTANDO,
+            actualizada_en__lt=cutoff,
+        ).update(
+            estado=EjecucionAgente.Estado.ERROR_CONTROLADO,
+            error_amigable=(
+                "La ejecución anterior se interrumpió. Los datos permanecen guardados y puedes iniciar un nuevo análisis."
+            ),
+            finalizada_en=timezone.now(),
+        )
+        activa = EjecucionAgente.objects.select_for_update().filter(
+            nota=nota,
+            operador=operador,
+            estado__in=[
+                EjecucionAgente.Estado.EJECUTANDO,
+                EjecucionAgente.Estado.ESPERANDO_HUMANO,
+            ],
+        ).first()
+        if activa:
+            return activa, False
+        try:
+            with transaction.atomic():
+                ejecucion = EjecucionAgente.objects.create(
+                    nota=nota, operador=operador
+                )
+        except IntegrityError:
+            activa = EjecucionAgente.objects.filter(
+                nota=nota,
+                operador=operador,
+                estado__in=[
+                    EjecucionAgente.Estado.EJECUTANDO,
+                    EjecucionAgente.Estado.ESPERANDO_HUMANO,
+                ],
+            ).first()
+            if activa:
+                return activa, False
+            raise
     estado: EstadoCrediTrade = {
         "ejecucion_id": str(ejecucion.pk), "nota_id": str(nota.pk), "operador_id": operador.pk,
         "roles_habilitados": _roles(operador), "etapa_actual": "inicio",

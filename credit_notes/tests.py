@@ -13,6 +13,15 @@ from credit_notes.ai_services import (
     generar_reporte_negociacion,
     generar_sugerencias_nota,
 )
+from credit_notes.gemini_service import (
+    GeminiInvalidResponseError,
+    GeminiQuotaExceededError,
+    GeminiRateLimitError,
+    GeminiTimeoutError,
+    GeminiUnavailableError,
+    _get_gemini_client,
+    call_structured,
+)
 from credit_notes.models import (
     Cliente,
     DocumentoRespaldo,
@@ -25,9 +34,15 @@ from credit_notes.models import (
     EventoAgente,
     MemoriaAgente,
     FragmentoDocumento,
+    OperacionIdempotente,
 )
 from credit_notes.agents import iniciar_analisis, registrar_decision
-from credit_notes.rag import fragmentar_texto, indexar_documento, preparar_evidencia
+from credit_notes.rag import (
+    fragmentar_texto,
+    indexar_documento,
+    indexar_documentos,
+    preparar_evidencia,
+)
 from pydantic import BaseModel
 from credit_notes.services import enviar_a_validacion, ejecutar_validacion_simulada
 
@@ -36,9 +51,17 @@ from credit_notes.services import enviar_a_validacion, ejecutar_validacion_simul
     SECURE_SSL_REDIRECT=False,
     GEMINI_API_KEY="test-key",
     GEMINI_MODEL="gemini-test",
+    GEMINI_FAST_MODEL="gemini-test",
+    GEMINI_DEEP_MODEL="gemini-test",
+    GEMINI_MAX_RETRIES=1,
+    GEMINI_RETRY_BASE_SECONDS=0.01,
+    GEMINI_MAX_RETRY_WAIT_SECONDS=8,
+    GEMINI_QUOTA_COOLDOWN_SECONDS=60,
+    GEMINI_CACHE_SECONDS=60,
 )
 class WorkflowTests(TestCase):
     def setUp(self):
+        _get_gemini_client.cache_clear()
         self.reception = Operador.objects.create_user(
             username="op1",
             password="test-pass-123",
@@ -146,7 +169,7 @@ class WorkflowTests(TestCase):
     def test_end_to_end_report_uses_gemini_only(self, mock_call):
         order = self.prepare_order()
 
-        def fake_call(prompt, schema_model):
+        def fake_call(prompt, schema_model, **_kwargs):
             return schema_model(
                 titulo=f"Ficha de negociación - {self.note.numero_titulo}",
                 resumen_ejecutivo="Resumen generado por Gemini.",
@@ -204,7 +227,7 @@ class WorkflowTests(TestCase):
     def test_suggestions_are_saved_only_after_valid_gemini_response(self, mock_call):
         self.add_document()
 
-        def fake_call(prompt, schema_model):
+        def fake_call(prompt, schema_model, **_kwargs):
             return schema_model(
                 sugerencias=[
                     {
@@ -363,6 +386,34 @@ class AgenticArchitectureTests(WorkflowTests):
         self.assertEqual(chunk.cliente, self.seller)
         self.assertEqual(chunk.fuente, document.fuente)
 
+    @patch("credit_notes.rag.generar_embeddings")
+    def test_rag_batches_documents_and_deduplicates_context(self, mocked_embeddings):
+        first = self.add_document()
+        second = DocumentoRespaldo.objects.create(
+            nota=self.note,
+            tipo_documento=DocumentoRespaldo.TipoDocumento.OTRO,
+            nombre="Segundo respaldo",
+            texto_extraido=first.texto_extraido,
+            cargado_por=self.reception,
+        )
+
+        def vectors(texts, **_kwargs):
+            return [[0.1] * 768 for _ in texts]
+
+        mocked_embeddings.side_effect = vectors
+        indexed = indexar_documentos([first, second])
+        result = preparar_evidencia(self.note)
+
+        self.assertEqual(len(indexed), 2)
+        self.assertEqual(mocked_embeddings.call_count, 2)
+        document_batch = mocked_embeddings.call_args_list[0].args[0]
+        self.assertEqual(len(document_batch), 2)
+        self.assertEqual(len(result["evidencia"]), 1)
+        self.assertLessEqual(
+            sum(len(item["texto"]) for item in result["evidencia"]),
+            4000,
+        )
+
     @patch("credit_notes.rag.buscar_fragmentos", return_value=[])
     @patch("credit_notes.rag.indexar_documento", return_value=[])
     def test_rag_states_when_evidence_is_insufficient(self, _index, _search):
@@ -370,15 +421,25 @@ class AgenticArchitectureTests(WorkflowTests):
         self.assertEqual(result["confianza"], 0.0)
         self.assertIn("No existe evidencia", result["conclusion"])
 
-    @patch("google.genai.Client", side_effect=TimeoutError("provider timeout"))
-    def test_gemini_timeout_is_controlled(self, _client):
+    @patch("credit_notes.gemini_service._get_gemini_client")
+    def test_gemini_timeout_is_controlled(self, mocked_client):
         class Schema(BaseModel):
             value: str
-        with self.assertRaises(GeminiServiceError):
+        mocked_client.return_value.interactions.create.side_effect = TimeoutError(
+            "provider timeout"
+        )
+        with self.assertRaises(GeminiTimeoutError):
             _call_gemini("prompt", Schema)
 
-    @patch("credit_notes.ai_services.time.sleep")
     @patch("google.genai.Client")
+    def test_sdk_retries_are_disabled_to_avoid_nested_backoff(self, mocked_client):
+        _get_gemini_client.cache_clear()
+        _get_gemini_client("isolated-test-key", 1000)
+        options = mocked_client.call_args.kwargs["http_options"]
+        self.assertEqual(options.retry_options.attempts, 1)
+
+    @patch("credit_notes.gemini_service.time.sleep")
+    @patch("credit_notes.gemini_service._get_gemini_client")
     def test_gemini_rate_limit_retries_once(self, mocked_client, mocked_sleep):
         class Schema(BaseModel):
             value: str
@@ -391,15 +452,172 @@ class AgenticArchitectureTests(WorkflowTests):
         mocked_sleep.assert_called_once_with(4.5)
         self.assertEqual(mocked_client.return_value.interactions.create.call_count, 2)
 
-    @patch("credit_notes.ai_services.time.sleep")
-    @patch("google.genai.Client")
+    @patch("credit_notes.gemini_service.time.sleep")
+    @patch("credit_notes.gemini_service._get_gemini_client")
     def test_gemini_does_not_block_for_long_rate_limit(self, mocked_client, mocked_sleep):
         class Schema(BaseModel):
             value: str
         mocked_client.return_value.interactions.create.side_effect = RuntimeError(
-            "429 too_many_requests Please retry in 44.1s."
+            "429 too_many_requests free_tier_requests, limit: 20; "
+            "check your plan and billing details. Please retry in 44.1s."
         )
-        with self.assertRaises(GeminiServiceError):
+        with self.assertRaises(GeminiRateLimitError):
             _call_gemini("prompt", Schema)
         mocked_sleep.assert_not_called()
         self.assertEqual(mocked_client.return_value.interactions.create.call_count, 1)
+
+    @patch("credit_notes.gemini_service.time.sleep")
+    @patch("credit_notes.gemini_service._get_gemini_client")
+    def test_gemini_503_retries_once_then_succeeds(self, mocked_client, mocked_sleep):
+        class Schema(BaseModel):
+            value: str
+
+        mocked_client.return_value.interactions.create.side_effect = [
+            RuntimeError("Error code: 503 UNAVAILABLE"),
+            SimpleNamespace(output_text='{"value":"ok"}'),
+        ]
+        result = _call_gemini("503 prompt", Schema, operation="503-test")
+        self.assertEqual(result.value, "ok")
+        self.assertEqual(mocked_client.return_value.interactions.create.call_count, 2)
+        mocked_sleep.assert_called_once()
+
+    @patch("credit_notes.gemini_service.time.sleep")
+    @patch("credit_notes.gemini_service._get_gemini_client")
+    def test_transient_errors_stop_at_configured_attempts(self, mocked_client, mocked_sleep):
+        class Schema(BaseModel):
+            value: str
+
+        mocked_client.return_value.interactions.create.side_effect = RuntimeError(
+            "Error code: 503 UNAVAILABLE"
+        )
+        with self.assertRaises(GeminiUnavailableError):
+            _call_gemini("max attempts", Schema, operation="attempt-test")
+        self.assertEqual(mocked_client.return_value.interactions.create.call_count, 2)
+        self.assertEqual(mocked_sleep.call_count, 1)
+
+    @patch("credit_notes.gemini_service.time.sleep")
+    @patch("credit_notes.gemini_service._get_gemini_client")
+    def test_hard_quota_has_no_retry_and_activates_cooldown(self, mocked_client, mocked_sleep):
+        class Schema(BaseModel):
+            value: str
+
+        mocked_client.return_value.interactions.create.side_effect = RuntimeError(
+            "429 RESOURCE_EXHAUSTED limit: 0; billing not enabled"
+        )
+        with self.assertRaises(GeminiQuotaExceededError):
+            _call_gemini("quota", Schema, operation="quota-test")
+        with self.assertRaises(GeminiQuotaExceededError):
+            _call_gemini("quota changed", Schema, operation="quota-test")
+        self.assertEqual(mocked_client.return_value.interactions.create.call_count, 1)
+        mocked_sleep.assert_not_called()
+        self.assertTrue(
+            OperacionIdempotente.objects.filter(
+                tipo="GEMINI_COOLDOWN", error_tipo="CUOTA_AGOTADA"
+            ).exists()
+        )
+
+    @patch("credit_notes.gemini_service._get_gemini_client")
+    def test_structured_response_cache_hit_avoids_second_call(self, mocked_client):
+        class Schema(BaseModel):
+            value: str
+
+        mocked_client.return_value.interactions.create.return_value = SimpleNamespace(
+            output_text='{"value":"cached"}'
+        )
+        first = call_structured("same", Schema, operation="cache-test")
+        second = call_structured("same", Schema, operation="cache-test")
+        self.assertEqual(first.value, second.value)
+        self.assertEqual(mocked_client.return_value.interactions.create.call_count, 1)
+        request_kwargs = mocked_client.return_value.interactions.create.call_args.kwargs
+        self.assertEqual(request_kwargs["model"], "gemini-test")
+        self.assertEqual(
+            request_kwargs["generation_config"]["thinking_level"], "minimal"
+        )
+        self.assertLessEqual(
+            request_kwargs["generation_config"]["max_output_tokens"], 512
+        )
+        self.assertFalse(request_kwargs["store"])
+        self.assertTrue(
+            OperacionIdempotente.objects.filter(
+                tipo__startswith="GEMINI_CACHE_"
+            ).exists()
+        )
+
+    @patch("credit_notes.gemini_service._get_gemini_client")
+    def test_cache_is_invalidated_when_prompt_changes(self, mocked_client):
+        class Schema(BaseModel):
+            value: str
+
+        mocked_client.return_value.interactions.create.side_effect = [
+            SimpleNamespace(output_text='{"value":"one"}'),
+            SimpleNamespace(output_text='{"value":"two"}'),
+        ]
+        first = call_structured("version one", Schema, operation="invalidate-test")
+        second = call_structured("version two", Schema, operation="invalidate-test")
+        self.assertEqual((first.value, second.value), ("one", "two"))
+        self.assertEqual(mocked_client.return_value.interactions.create.call_count, 2)
+
+    @patch("credit_notes.gemini_service._get_gemini_client")
+    def test_invalid_structured_response_is_controlled(self, mocked_client):
+        class Schema(BaseModel):
+            value: str
+
+        mocked_client.return_value.interactions.create.return_value = SimpleNamespace(
+            output_text='{"unexpected":true}'
+        )
+        with self.assertRaises(GeminiInvalidResponseError):
+            call_structured("invalid", Schema, operation="invalid-test")
+
+    @patch("credit_notes.views.generar_sugerencias_nota", return_value=[])
+    def test_suggestion_double_submission_calls_service_once(self, mocked_generate):
+        client = HttpClient()
+        client.force_login(self.reception)
+        url = reverse("ai_generate_suggestions", args=[self.note.pk])
+        self.assertEqual(client.post(url).status_code, 302)
+        self.assertEqual(client.post(url).status_code, 302)
+        mocked_generate.assert_called_once()
+
+    @patch("credit_notes.views.generar_sugerencias_nota")
+    def test_quota_error_view_is_friendly_and_preserves_data(self, mocked_generate):
+        mocked_generate.side_effect = GeminiQuotaExceededError("technical quota detail")
+        client = HttpClient()
+        client.force_login(self.reception)
+        response = client.post(
+            reverse("ai_generate_suggestions", args=[self.note.pk]), follow=True
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "alcanzó temporalmente su límite de uso")
+        self.assertNotContains(response, "technical quota detail")
+        self.assertTrue(NotaCredito.objects.filter(pk=self.note.pk).exists())
+
+    @patch("credit_notes.ai_services._call_gemini")
+    def test_multiple_suggestions_use_one_consolidated_call(self, mocked_call):
+        self.add_document()
+
+        def response(_prompt, schema_model, **_kwargs):
+            return schema_model(
+                sugerencias=[
+                    {
+                        "campo": "estado_fuente",
+                        "valor_sugerido": "VIGENTE",
+                        "confianza": 0.9,
+                        "fuente": "Respaldo",
+                        "evidencia": "Estado indicado.",
+                    },
+                    {
+                        "campo": "saldo_disponible",
+                        "valor_sugerido": "950.00",
+                        "confianza": 0.8,
+                        "fuente": "Respaldo",
+                        "evidencia": "Saldo indicado.",
+                    },
+                ]
+            )
+
+        mocked_call.side_effect = response
+        suggestions = generar_sugerencias_nota(self.note, self.reception)
+        self.assertEqual(len(suggestions), 2)
+        mocked_call.assert_called_once()
+        prompt = mocked_call.call_args.args[0]
+        self.assertLess(len(prompt), 5000)
+        self.assertNotIn("Reglas obligatorias para la respuesta", prompt)

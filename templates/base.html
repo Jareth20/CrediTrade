@@ -102,13 +102,34 @@
 <script>
 document.addEventListener('submit', function (event) {
   const form = event.target;
+  if (form.dataset.submitting === 'true') { event.preventDefault(); return; }
   if (form.method.toLowerCase() !== 'post' || !form.checkValidity() || form.dataset.noLoading === 'true') return;
+  form.dataset.submitting = 'true';
   const overlay = document.getElementById('operationOverlay');
   document.getElementById('operationMessage').textContent = form.dataset.loadingMessage || 'Todo va bien. Estamos procesando la información de forma segura; por favor, espera un momento.';
   overlay.classList.add('is-visible'); overlay.setAttribute('aria-hidden', 'false'); document.body.classList.add('operation-locked');
-  form.querySelectorAll('button, input[type="submit"]').forEach(el => el.disabled = true);
+  form.querySelectorAll('button, input[type="submit"]').forEach(function (el) {
+    el.dataset.operationOriginalDisabled = el.disabled ? 'true' : 'false';
+    if (el.tagName === 'BUTTON') {
+      el.dataset.operationOriginalHtml = el.innerHTML;
+      el.innerHTML = '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>' + (form.dataset.loadingLabel || 'Procesando…');
+    }
+    el.disabled = true;
+  });
 });
-window.addEventListener('pageshow', function () { document.getElementById('operationOverlay')?.classList.remove('is-visible'); document.body.classList.remove('operation-locked'); });
+window.addEventListener('pageshow', function () {
+  document.getElementById('operationOverlay')?.classList.remove('is-visible');
+  document.body.classList.remove('operation-locked');
+  document.querySelectorAll('form[data-submitting="true"]').forEach(function (form) {
+    delete form.dataset.submitting;
+    form.querySelectorAll('[data-operation-original-disabled]').forEach(function (el) {
+      el.disabled = el.dataset.operationOriginalDisabled === 'true';
+      if (el.dataset.operationOriginalHtml) el.innerHTML = el.dataset.operationOriginalHtml;
+      delete el.dataset.operationOriginalDisabled;
+      delete el.dataset.operationOriginalHtml;
+    });
+  });
+});
 </script>
 {% block extra_js %}{% endblock %}
 </body>

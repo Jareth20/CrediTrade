@@ -1,9 +1,9 @@
-from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db import connection
 from pydantic import BaseModel
 
 from credit_notes.ai_services import GeminiServiceError, _call_gemini
+from credit_notes.gemini_service import get_profile, user_message
 
 
 class Command(BaseCommand):
@@ -41,9 +41,12 @@ class Command(BaseCommand):
             result = _call_gemini(
                 'Responde únicamente con JSON y el campo "estado" igual a "ok".',
                 HealthResponse,
+                operation="verificacion_integracion",
+                profile="fast",
+                force_refresh=True,
             )
         except GeminiServiceError as exc:
-            raise CommandError(f"Gemini no está disponible: {exc}") from exc
+            raise CommandError(user_message(exc)) from exc
 
         if result.estado.lower() != "ok":
             raise CommandError(
@@ -51,6 +54,6 @@ class Command(BaseCommand):
             )
         self.stdout.write(
             self.style.SUCCESS(
-                f"Gemini conectado correctamente con el modelo {settings.GEMINI_MODEL}."
+                f"Gemini conectado correctamente con el modelo {get_profile('fast').model}."
             )
         )

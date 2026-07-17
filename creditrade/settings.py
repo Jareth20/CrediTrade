@@ -144,14 +144,52 @@ LOGOUT_REDIRECT_URL = "accounts:login"
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash").strip()
+GEMINI_FAST_MODEL = os.getenv("GEMINI_FAST_MODEL", GEMINI_MODEL).strip()
+GEMINI_DEEP_MODEL = os.getenv("GEMINI_DEEP_MODEL", GEMINI_MODEL).strip()
+GEMINI_FAST_THINKING_LEVEL = os.getenv(
+    "GEMINI_FAST_THINKING_LEVEL", "minimal"
+).strip()
+GEMINI_DEEP_THINKING_LEVEL = os.getenv(
+    "GEMINI_DEEP_THINKING_LEVEL", "low"
+).strip()
+GEMINI_MAX_OUTPUT_TOKENS = int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "900"))
 GEMINI_TIMEOUT_MS = int(os.getenv("GEMINI_TIMEOUT_MS", "60000"))
+GEMINI_MAX_RETRIES = int(os.getenv("GEMINI_MAX_RETRIES", "1"))
+GEMINI_RETRY_BASE_SECONDS = float(os.getenv("GEMINI_RETRY_BASE_SECONDS", "1"))
+GEMINI_MAX_RETRY_WAIT_SECONDS = float(
+    os.getenv("GEMINI_MAX_RETRY_WAIT_SECONDS", "8")
+)
+GEMINI_QUOTA_COOLDOWN_SECONDS = int(
+    os.getenv("GEMINI_QUOTA_COOLDOWN_SECONDS", "900")
+)
+GEMINI_CACHE_SECONDS = int(os.getenv("GEMINI_CACHE_SECONDS", "86400"))
+AI_OPERATION_LOCK_SECONDS = int(os.getenv("AI_OPERATION_LOCK_SECONDS", "300"))
 GEMINI_EMBEDDING_MODEL = os.getenv(
     "GEMINI_EMBEDDING_MODEL", "gemini-embedding-001"
 ).strip()
 RAG_EMBEDDING_DIMENSIONS = int(os.getenv("RAG_EMBEDDING_DIMENSIONS", "768"))
-RAG_TOP_K = int(os.getenv("RAG_TOP_K", "6"))
-AGENT_MAX_RETRIES = int(os.getenv("AGENT_MAX_RETRIES", "1"))
+RAG_TOP_K = int(os.getenv("RAG_TOP_K", "4"))
+RAG_MIN_RELEVANCE = float(os.getenv("RAG_MIN_RELEVANCE", "0.20"))
+RAG_MAX_CONTEXT_CHARS = int(os.getenv("RAG_MAX_CONTEXT_CHARS", "4000"))
+RAG_MAX_DOCUMENTS = int(os.getenv("RAG_MAX_DOCUMENTS", "12"))
+RAG_MAX_CHUNKS_PER_DOCUMENT = int(
+    os.getenv("RAG_MAX_CHUNKS_PER_DOCUMENT", "12")
+)
+RAG_MAX_EMBEDDING_BATCH = int(os.getenv("RAG_MAX_EMBEDDING_BATCH", "48"))
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {"console": {"class": "logging.StreamHandler"}},
+    "loggers": {
+        "credit_notes": {
+            "handlers": ["console"],
+            "level": os.getenv("CREDITRADE_LOG_LEVEL", "INFO"),
+            "propagate": False,
+        }
+    },
+}
 
 # Límites conservadores para un MVP serverless.
 DATA_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024

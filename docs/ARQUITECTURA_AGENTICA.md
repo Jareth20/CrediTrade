@@ -85,7 +85,7 @@ Variables nuevas (sin valores secretos):
 - `GEMINI_EMBEDDING_MODEL`
 - `RAG_EMBEDDING_DIMENSIONS` (el esquema inicial usa 768)
 - `RAG_TOP_K`
-- `AGENT_MAX_RETRIES`
+- `GEMINI_MAX_RETRIES`
 
 Dependencias: `langgraph` y `pgvector`. La migracion `0004_agentic_rag` ejecuta
 `CREATE EXTENSION IF NOT EXISTS vector` solo en PostgreSQL. En Neon debe ejecutarse con

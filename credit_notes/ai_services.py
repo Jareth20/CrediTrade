@@ -1,18 +1,19 @@
 import json
 import logging
-import time
 from decimal import Decimal
-from typing import List, Literal
+from typing import List
 
 from django.conf import settings
 from django.db import transaction
-from pydantic import BaseModel
-
+from .gemini_service import (
+    GeminiAuthorizationError,
+    GeminiServiceError,
+    call_structured,
+    classify_error,
+    get_profile,
+)
 from .models import NotaCredito, ReporteIA, SugerenciaIA
 from .services import registrar_evento
-import re
-
-from pydantic import ValidationError
 logger = logging.getLogger(__name__)
 
 ALLOWED_SUGGESTION_FIELDS = {
@@ -26,156 +27,27 @@ ALLOWED_SUGGESTION_FIELDS = {
 }
 
 
-class GeminiServiceError(RuntimeError):
-    """Error controlado al consultar o validar una respuesta de Gemini."""
-
-
 def _rate_limit_delay(exc):
-    """Devuelve una espera corta para 429; None para errores no reintentables."""
-    detail = str(exc).lower()
-    if "429" not in detail and "too_many_requests" not in detail:
-        return None
-    match = re.search(r"retry in\s+([0-9]+(?:\.[0-9]+)?)s", detail)
-    requested = float(match.group(1)) if match else 2.0
-    if requested > 10.0:
-        return None
-    return max(requested, 1.0)
+    """Compatibilidad con pruebas y utilidades anteriores."""
+    classified = classify_error(exc)
+    return classified.retry_delay if classified.retryable else None
 
 
-def _call_gemini(prompt, schema_model):
-    """
-    Consulta Gemini mediante Interactions API y valida la salida
-    estructurada con Pydantic. No utiliza fallback local.
-    """
-    if not settings.GEMINI_API_KEY:
-        raise GeminiServiceError(
-            "GEMINI_API_KEY no está configurada."
-        )
-
-    if not settings.GEMINI_MODEL:
-        raise GeminiServiceError(
-            "GEMINI_MODEL no está configurado."
-        )
-
-    try:
-        from google import genai
-        from google.genai import types
-    except ImportError as exc:
-        raise GeminiServiceError(
-            "La dependencia google-genai no está instalada."
-        ) from exc
-
-    try:
-        client = genai.Client(
-            api_key=settings.GEMINI_API_KEY,
-            http_options=types.HttpOptions(
-                timeout=settings.GEMINI_TIMEOUT_MS
-            ),
-        )
-
-        interaction = None
-        for attempt in range(settings.AGENT_MAX_RETRIES + 1):
-            try:
-                interaction = client.interactions.create(
-                    model=settings.GEMINI_MODEL,
-                    input=prompt,
-                    response_format={
-                        "type": "text",
-                        "mime_type": "application/json",
-                        "schema": schema_model.model_json_schema(),
-                    },
-                )
-                break
-            except Exception as exc:
-                delay = _rate_limit_delay(exc)
-                if delay is None or attempt >= settings.AGENT_MAX_RETRIES:
-                    raise
-                logger.warning(
-                    "Gemini aplicó límite de cuota; reintento %s en %.2f segundos.",
-                    attempt + 1,
-                    delay,
-                )
-                time.sleep(delay)
-
-        output_text = getattr(interaction, "output_text", None)
-
-        if not output_text:
-            raise GeminiServiceError(
-                "Gemini respondió sin contenido."
-            )
-
-        contenido = output_text.strip()
-
-        # Protección adicional por si la respuesta incluye bloques Markdown.
-        contenido = re.sub(
-            r"^```(?:json)?\s*|\s*```$",
-            "",
-            contenido,
-            flags=re.IGNORECASE,
-        ).strip()
-
-        try:
-            return schema_model.model_validate_json(contenido)
-
-        except ValidationError as exc:
-            logger.error(
-                "La respuesta de Gemini no cumplió el esquema. "
-                "Respuesta recibida: %s",
-                "contenido omitido por proteccion de datos",
-            )
-            logger.exception(
-                "Detalle de validación Pydantic: %s",
-                exc,
-            )
-
-            detalle = "respuesta estructurada invalida"
-
-            raise GeminiServiceError(
-                "Gemini respondió, pero algunos datos no tenían "
-                f"el formato esperado. Detalle: {detalle}"
-            ) from exc
-
-        if not output_text:
-            raise GeminiServiceError(
-                "Gemini respondió, pero no devolvió contenido."
-            )
-
-        return schema_model.model_validate_json(output_text)
-
-    except GeminiServiceError:
-        raise
-
-    except Exception as exc:
-        logger.exception(
-            "Error real al consultar Gemini: %s",
-            exc,
-        )
-
-        detalle = ""
-
-        if False and settings.DEBUG:
-            detalle = (
-                f" Detalle técnico: "
-                f"{type(exc).__name__}: {exc}"
-            )
-
-        raise GeminiServiceError(
-            "Gemini no pudo generar una respuesta estructurada válida."
-            + detalle
-        ) from exc
+def _call_gemini(prompt, schema_model, **kwargs):
+    """API compatible que delega en el servicio centralizado."""
+    return call_structured(prompt, schema_model, **kwargs)
 
 
 def _require_ai_authorization(nota):
     if not nota.cliente_vendedor.autorizacion_consulta:
-        raise GeminiServiceError(
+        raise GeminiAuthorizationError(
             "El titular no ha autorizado el procesamiento de sus datos con IA."
         )
 
 
 def _serialize_note(nota):
-    return {
+    data = {
         "numero_titulo": nota.numero_titulo,
-        "ruc_titular": nota.cliente_vendedor.ruc_identificacion,
         "tipo_nota": nota.tipo_nota,
         "origen_tributario": nota.origen_tributario,
         "valor_nominal": str(nota.valor_nominal),
@@ -183,9 +55,12 @@ def _serialize_note(nota):
         "minimo_recibir": str(nota.minimo_recibir),
         "fecha_emision": nota.fecha_emision.isoformat() if nota.fecha_emision else None,
         "estado_fuente": nota.estado_fuente,
-        "estado_flujo": nota.estado_flujo,
-        "creado_en": nota.creado_en.isoformat(),
     }
+    return {key: value for key, value in data.items() if value not in (None, "")}
+
+
+def _compact_json(value):
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
 def generar_sugerencias_nota(nota, operador):
@@ -195,15 +70,16 @@ def generar_sugerencias_nota(nota, operador):
     antecedentes = list(
         NotaCredito.objects.filter(cliente_vendedor=nota.cliente_vendedor)
         .exclude(pk=nota.pk)
-        .order_by("-actualizado_en")[:4]
+        .order_by("-actualizado_en")[:2]
     )
     documentos = [
         {
             "tipo": documento.tipo_documento,
             "fuente": documento.fuente,
-            "texto": documento.texto_extraido[:1200],
+            "hash": documento.hash_sha256,
+            "texto": documento.texto_extraido[:800],
         }
-        for documento in nota.documentos.all()[:3]
+        for documento in nota.documentos.all()[:2]
         if documento.texto_extraido
     ]
 
@@ -240,46 +116,28 @@ def generar_sugerencias_nota(nota, operador):
         default_factory=list
     )
 
-    prompt = f"""
-Eres el asistente de debida diligencia de CrediTrade, un MVP para una casa de valores en Ecuador.
-Genera únicamente sugerencias de precarga sustentadas en antecedentes o documentos proporcionados.
-No inventes validaciones del SRI, DECEVALE, una bolsa de valores ni terceros.
-No afirmes que un título existe si la evidencia no lo demuestra.
-Si no existe evidencia suficiente para un campo, omítelo.
-Cada sugerencia debe identificar una fuente concreta y explicar brevemente la evidencia.
-Las sugerencias serán revisadas, aceptadas o rechazadas por un operador humano.
+    payload = {
+        "actual": _serialize_note(nota),
+        "antecedentes": [_serialize_note(item) for item in antecedentes],
+        "documentos": documentos,
+    }
+    prompt = (
+        "Genera sugerencias de precarga para CrediTrade usando solo la evidencia JSON. "
+        "Campos permitidos: tipo_nota, origen_tributario, valor_nominal, "
+        "saldo_disponible, minimo_recibir, fecha_emision, estado_fuente. "
+        "Omite campos sin evidencia; no atribuyas validaciones a SRI/DECEVALE; "
+        "fuente y evidencia deben ser breves. Datos:"
+        + _compact_json(payload)
+    )
 
-Reglas obligatorias para la respuesta:
-
-1. Devuelve un objeto JSON con una propiedad llamada "sugerencias".
-2. "sugerencias" siempre debe ser una lista.
-3. Si no existe evidencia suficiente, devuelve:
-   {{"sugerencias": []}}
-4. Utiliza únicamente estos nombres exactos de campos:
-   - tipo_nota
-   - origen_tributario
-   - valor_nominal
-   - saldo_disponible
-   - minimo_recibir
-   - fecha_emision
-   - estado_fuente
-5. No incluyas texto fuera del JSON.
-6. No inventes datos del SRI, DECEVALE ni del cliente.
-
-Caso actual:
-{json.dumps(_serialize_note(nota), ensure_ascii=False)}
-
-Antecedentes del mismo RUC:
-{json.dumps(
-    [_serialize_note(item) for item in antecedentes],
-    ensure_ascii=False,
-)}
-
-Documentos y texto de respaldo:
-{json.dumps(documentos, ensure_ascii=False)}
-"""
-
-    bundle = _call_gemini(prompt, SuggestionBundle)
+    bundle = _call_gemini(
+        prompt,
+        SuggestionBundle,
+        operation="sugerencias",
+        profile="fast",
+        prompt_version="sugerencias-v2",
+        note_id=str(nota.pk),
+    )
     campos_permitidos = {
         "tipo_nota",
         "origen_tributario",
@@ -322,7 +180,7 @@ Documentos y texto de respaldo:
                     confianza=confidence,
                     fuente=str(suggestion.get("fuente", "Gemini"))[:160],
                     evidencia=str(suggestion.get("evidencia", "")),
-                    generada_por_modelo=settings.GEMINI_MODEL,
+                    generada_por_modelo=get_profile("fast").model,
                 )
             )
 
@@ -331,7 +189,7 @@ Documentos y texto de respaldo:
             operador,
             "SUGERENCIAS_GENERADAS",
             f"Gemini generó {len(created)} sugerencias para revisión humana.",
-            {"modelo": settings.GEMINI_MODEL, "cantidad": len(created)},
+            {"modelo": get_profile("fast").model, "cantidad": len(created)},
         )
     return created
 
@@ -362,16 +220,19 @@ def generar_explicacion_validacion(validacion):
         "riesgos": validacion.coincidencias_riesgo,
         "resultado_reglas": validacion.resultado,
     }
-    prompt = f"""
-Resume en español la validación de una nota de crédito tributaria para CrediTrade.
-No modifiques el resultado calculado por reglas y no inventes hechos fuera del JSON.
-Explica la evidencia que debe revisar el operador 2 y propone una siguiente acción concreta.
-La decisión final siempre corresponde a una persona autorizada.
-
-Datos:
-{json.dumps(context, ensure_ascii=False)}
-"""
-    result = _call_gemini(prompt, ValidationExplanation)
+    prompt = (
+        "Explica brevemente en español esta validación por reglas. No cambies el resultado, "
+        "no inventes hechos y devuelve evidencia a revisar y una acción humana concreta. Datos:"
+        + _compact_json(context)
+    )
+    result = _call_gemini(
+        prompt,
+        ValidationExplanation,
+        operation="explicacion_validacion",
+        profile="fast",
+        prompt_version="validacion-v2",
+        note_id=str(validacion.nota_id),
+    )
     explanation = result.resumen.strip()
     if result.evidencia_a_revisar:
         explanation += "\n\nEvidencia a revisar:\n- " + "\n- ".join(
@@ -420,8 +281,8 @@ def generar_reporte_negociacion(nota, operador):
             "vigencia_hasta": (
                 order.vigencia_hasta.isoformat() if order.vigencia_hasta else None
             ),
-            "terminos": order.terminos,
-            "observaciones": order.observaciones,
+            "terminos": order.terminos[:1200],
+            "observaciones": order.observaciones[:800],
         },
         "responsables": {
             "recepcionista": str(nota.recepcionista),
@@ -434,7 +295,7 @@ def generar_reporte_negociacion(nota, operador):
                 "tipo": documento.get_tipo_documento_display(),
                 "fuente": documento.fuente,
             }
-            for documento in nota.documentos.all()
+            for documento in nota.documentos.all()[:5]
         ],
         "aviso_regulatorio": (
             "Este documento es un borrador de negociación. La liquidación, transferencia "
@@ -452,17 +313,20 @@ def generar_reporte_negociacion(nota, operador):
         siguiente_accion: str
         texto_carta: str
 
-    prompt = f"""
-Redacta un borrador profesional, claro y conciso de negociación para CrediTrade.
-Usa exclusivamente los datos del JSON. No inventes validaciones, normas, garantías ni compradores.
-Distingue hechos confirmados, riesgos y pendientes.
-Indica expresamente que liquidación, transferencia y endoso requieren aprobación humana y ejecución externa.
-El documento será revisado por un operador 3 antes de utilizarse.
-
-Datos:
-{json.dumps(base_content, ensure_ascii=False)}
-"""
-    result = _call_gemini(prompt, NegotiationDraft)
+    prompt = (
+        "Redacta un borrador conciso de negociación para revisión humana. Usa solo el JSON; "
+        "separa hechos, riesgos y pendientes; no inventes validaciones ni garantías; indica que "
+        "liquidación, transferencia y endoso son externos y requieren aprobación. Datos:"
+        + _compact_json(base_content)
+    )
+    result = _call_gemini(
+        prompt,
+        NegotiationDraft,
+        operation="reporte_negociacion",
+        profile="deep",
+        prompt_version="reporte-v2",
+        note_id=str(nota.pk),
+    )
     base_content["puntos_clave"] = result.puntos_clave
     base_content["riesgos_y_pendientes"] = result.riesgos_y_pendientes
     base_content["siguiente_accion_ia"] = result.siguiente_accion
@@ -475,7 +339,7 @@ Datos:
             titulo=result.titulo[:200],
             resumen=result.resumen_ejecutivo,
             contenido=base_content,
-            modelo_ia=settings.GEMINI_MODEL,
+            modelo_ia=get_profile("deep").model,
             generado_por=operador,
         )
         registrar_evento(
@@ -483,6 +347,6 @@ Datos:
             operador,
             "REPORTE_IA_GENERADO",
             "Gemini generó un borrador de negociación para revisión del operador 3.",
-            {"reporte_id": str(report.id), "modelo": settings.GEMINI_MODEL},
+            {"reporte_id": str(report.id), "modelo": get_profile("deep").model},
         )
     return report

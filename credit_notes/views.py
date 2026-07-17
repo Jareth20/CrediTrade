@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
@@ -20,6 +20,7 @@ from .ai_services import (
     generar_reporte_negociacion,
     generar_sugerencias_nota,
 )
+from .gemini_service import user_message as gemini_user_message
 from .decorators import role_required
 from .agents import iniciar_analisis, registrar_decision
 from .forms import (
@@ -72,6 +73,62 @@ def _get_note_for_user(user, pk):
     if not _can_view_note(user, note):
         raise Http404
     return note
+
+
+def _acquire_ai_operation(key, operation_type):
+    """Candado persistente con recuperación de ejecuciones abandonadas."""
+    now = timezone.now()
+    expires = now + timedelta(seconds=settings.AI_OPERATION_LOCK_SECONDS)
+    try:
+        with transaction.atomic():
+            OperacionIdempotente.objects.create(
+                clave=key,
+                tipo=operation_type,
+                expira_en=expires,
+                intentos=1,
+            )
+        return True
+    except IntegrityError:
+        with transaction.atomic():
+            operation = OperacionIdempotente.objects.select_for_update().get(clave=key)
+            stale = operation.completada_en is None and (
+                (operation.expira_en and operation.expira_en <= now)
+                or (
+                    operation.expira_en is None
+                    and operation.creada_en
+                    <= now - timedelta(seconds=settings.AI_OPERATION_LOCK_SECONDS)
+                )
+            )
+            if not stale:
+                return False
+            operation.tipo = operation_type
+            operation.expira_en = expires
+            operation.intentos += 1
+            operation.error_tipo = ""
+            operation.resultado = {}
+            operation.save(
+                update_fields=[
+                    "tipo",
+                    "expira_en",
+                    "intentos",
+                    "error_tipo",
+                    "resultado",
+                    "actualizada_en",
+                ]
+            )
+            return True
+
+
+def _finish_ai_operation(key, result_id=""):
+    OperacionIdempotente.objects.filter(clave=key).update(
+        completada_en=timezone.now(), resultado_id=str(result_id or "")
+    )
+
+
+def _fail_ai_operation(key, error_type=""):
+    OperacionIdempotente.objects.filter(
+        clave=key, completada_en__isnull=True
+    ).update(error_tipo=error_type, expira_en=timezone.now())
 
 
 @login_required
@@ -436,18 +493,16 @@ def ai_generate_suggestions(request, pk):
         messages.error(request, "Solo se generan sugerencias durante recepción/corrección.")
         return redirect("nota_detail", pk=note.pk)
     key = f"sugerencias:{note.pk}:{note.actualizado_en.isoformat()}"
-    try:
-        OperacionIdempotente.objects.create(clave=key, tipo="SUGERENCIAS_IA")
-    except IntegrityError:
+    if not _acquire_ai_operation(key, "SUGERENCIAS_IA"):
         messages.info(request, "Esta solicitud ya fue procesada o continúa en curso. No se duplicarán datos.")
         return redirect("suggestion_review", pk=note.pk)
     try:
         created = generar_sugerencias_nota(note, request.user)
-    except GeminiServiceError:
-        OperacionIdempotente.objects.filter(clave=key, completada_en__isnull=True).delete()
-        messages.error(request, "No fue posible completar el analisis en este momento. La informacion registrada permanece guardada. Puedes intentar nuevamente.")
+    except GeminiServiceError as exc:
+        _fail_ai_operation(key, type(exc).__name__)
+        messages.error(request, gemini_user_message(exc))
         return redirect("nota_detail", pk=note.pk)
-    OperacionIdempotente.objects.filter(clave=key).update(completada_en=timezone.now())
+    _finish_ai_operation(key)
 
     if created:
         messages.success(
@@ -586,9 +641,7 @@ def validation_run(request, pk):
         messages.error(request, "El caso no está disponible para validación.")
         return redirect("nota_detail", pk=note.pk)
     key = f"validacion:{note.pk}:{note.actualizado_en.isoformat()}"
-    try:
-        OperacionIdempotente.objects.create(clave=key, tipo="VALIDACION_IA")
-    except IntegrityError:
+    if not _acquire_ai_operation(key, "VALIDACION_IA"):
         messages.info(request, "La validación ya fue solicitada. Se muestra el resultado existente.")
         return redirect("validation_detail", pk=note.pk)
     validation = ejecutar_validacion_simulada(note, request.user)
@@ -597,12 +650,12 @@ def validation_run(request, pk):
         messages.success(
             request, "Validación comparativa ejecutada y explicada por Gemini."
         )
-    except GeminiServiceError:
+    except GeminiServiceError as exc:
         messages.warning(
             request,
-            "La validación por reglas quedó registrada, pero la explicación asistida no estuvo disponible. Puedes reintentar.",
+            "La validación por reglas quedó registrada. " + gemini_user_message(exc),
         )
-    OperacionIdempotente.objects.filter(clave=key).update(completada_en=timezone.now(), resultado_id=str(validation.pk))
+    _finish_ai_operation(key, validation.pk)
     return redirect("validation_detail", pk=note.pk)
 
 
@@ -615,18 +668,12 @@ def validation_explanation_retry(request, pk):
         messages.error(request, "Primero ejecuta la validación por reglas.")
         return redirect("validation_detail", pk=note.pk)
     key = f"explicacion-validacion:{validation.pk}"
-    try:
-        OperacionIdempotente.objects.create(
-            clave=key, tipo="EXPLICACION_VALIDACION_IA"
-        )
-    except IntegrityError:
+    if not _acquire_ai_operation(key, "EXPLICACION_VALIDACION_IA"):
         messages.info(request, "La explicación ya fue generada o continúa en proceso.")
         return redirect("validation_detail", pk=note.pk)
     try:
         generar_explicacion_validacion(validation)
-        OperacionIdempotente.objects.filter(clave=key).update(
-            completada_en=timezone.now(), resultado_id=str(validation.pk)
-        )
+        _finish_ai_operation(key, validation.pk)
         registrar_evento(
             note,
             request.user,
@@ -635,13 +682,11 @@ def validation_explanation_retry(request, pk):
             {"validacion": str(validation.pk)},
         )
         messages.success(request, "Explicación asistida generada para revisión.")
-    except GeminiServiceError:
-        OperacionIdempotente.objects.filter(
-            clave=key, completada_en__isnull=True
-        ).delete()
+    except GeminiServiceError as exc:
+        _fail_ai_operation(key, type(exc).__name__)
         messages.warning(
             request,
-            "La explicación asistida sigue sin estar disponible. La validación por reglas permanece guardada.",
+            gemini_user_message(exc) + " La validación por reglas permanece guardada.",
         )
     return redirect("validation_detail", pk=note.pk)
 
@@ -784,19 +829,21 @@ def report_generate(request, pk):
         order = None
     version = order.actualizado_en.isoformat() if order else note.actualizado_en.isoformat()
     key = f"reporte:{note.pk}:{version}"
-    try:
-        OperacionIdempotente.objects.create(clave=key, tipo="REPORTE_IA")
-    except IntegrityError:
+    if not _acquire_ai_operation(key, "REPORTE_IA"):
         messages.info(request, "El reporte para esta versión ya fue generado o está en proceso.")
         return redirect("nota_detail", pk=note.pk)
     try:
         report = generar_reporte_negociacion(note, request.user)
-        OperacionIdempotente.objects.filter(clave=key).update(completada_en=timezone.now(), resultado_id=str(report.pk))
+        _finish_ai_operation(key, report.pk)
         messages.success(request, "Gemini generó el borrador para revisión.")
         return redirect("report_detail", report_id=report.pk)
-    except (ValueError, GeminiServiceError):
-        OperacionIdempotente.objects.filter(clave=key, completada_en__isnull=True).delete()
-        messages.error(request, "No fue posible generar el borrador en este momento. Los datos permanecen guardados; puedes reintentar.")
+    except ValueError:
+        _fail_ai_operation(key, "DATOS_INCOMPLETOS")
+        messages.error(request, "Primero completa y guarda la orden de negociación.")
+        return redirect("nota_detail", pk=note.pk)
+    except GeminiServiceError as exc:
+        _fail_ai_operation(key, type(exc).__name__)
+        messages.error(request, gemini_user_message(exc))
         return redirect("nota_detail", pk=note.pk)
 
 

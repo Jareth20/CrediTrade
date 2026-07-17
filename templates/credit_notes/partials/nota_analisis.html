@@ -1,6 +1,6 @@
 <div class="section-heading">
   <div><span class="section-kicker">Orquestación LangGraph</span><h2>Centro de analisis asistido</h2><p>Agentes especializados preparan evidencia y recomendaciones; el operador conserva cada decisión.</p></div>
-  <form method="post" action="{% url 'agent_analysis_start' nota.pk %}" data-loading-message="Preparando expediente... Recuperando antecedentes y analizando inconsistencias.">{% csrf_token %}<button class="btn btn-primary" type="submit" {% if ejecucion_agente.estado == 'EJECUTANDO' or ejecucion_agente.estado == 'ESPERANDO_HUMANO' %}disabled{% endif %}><i class="bi bi-diagram-3 me-1"></i>{% if ejecucion_agente %}Nuevo análisis{% else %}Analizar expediente{% endif %}</button></form>
+  <form method="post" action="{% url 'agent_analysis_start' nota.pk %}" data-loading-message="Recuperando únicamente la evidencia relevante y analizando inconsistencias. Esta revisión integral puede tardar un poco más." data-loading-label="Analizando expediente…">{% csrf_token %}<button class="btn btn-primary" type="submit" {% if ejecucion_agente.estado == 'EJECUTANDO' or ejecucion_agente.estado == 'ESPERANDO_HUMANO' %}disabled{% endif %}><i class="bi bi-diagram-3 me-1"></i>{% if ejecucion_agente %}Nuevo análisis{% else %}Analizar expediente{% endif %}</button></form>
 </div>
 <article class="agent-center soft-card section-card">
   {% if ejecucion_agente %}

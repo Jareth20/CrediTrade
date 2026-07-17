@@ -650,8 +650,13 @@ class OperacionIdempotente(models.Model):
     clave = models.CharField(max_length=255, unique=True)
     tipo = models.CharField(max_length=80, db_index=True)
     creada_en = models.DateTimeField(auto_now_add=True)
+    actualizada_en = models.DateTimeField(auto_now=True)
     completada_en = models.DateTimeField(null=True, blank=True)
     resultado_id = models.CharField(max_length=80, blank=True)
+    resultado = models.JSONField(default=dict, blank=True)
+    error_tipo = models.CharField(max_length=40, blank=True)
+    intentos = models.PositiveSmallIntegerField(default=0)
+    expira_en = models.DateTimeField(null=True, blank=True, db_index=True)
 
 
 class EjecucionAgente(models.Model):
@@ -686,6 +691,15 @@ class EjecucionAgente(models.Model):
 
     class Meta:
         ordering = ["-iniciada_en"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["nota", "operador"],
+                condition=models.Q(
+                    estado__in=["EJECUTANDO", "ESPERANDO_HUMANO"]
+                ),
+                name="unique_active_agent_run",
+            )
+        ]
         indexes = [
             models.Index(fields=["nota", "estado", "iniciada_en"], name="credit_note_nota_id_335f05_idx"),
             models.Index(fields=["operador", "estado"], name="credit_note_operado_b1316a_idx"),
