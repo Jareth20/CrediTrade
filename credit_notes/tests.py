@@ -29,6 +29,7 @@ from credit_notes.models import (
     OrdenNegociacion,
     RegistroSimuladoTitulo,
     ReporteIA,
+    SugerenciaIA,
     SolicitudAprobacion,
     EjecucionAgente,
     EventoAgente,
@@ -621,3 +622,14 @@ class AgenticArchitectureTests(WorkflowTests):
         prompt = mocked_call.call_args.args[0]
         self.assertLess(len(prompt), 5000)
         self.assertNotIn("Reglas obligatorias para la respuesta", prompt)
+
+    @patch("credit_notes.gemini_service._get_gemini_client")
+    def test_suggestion_schema_rejects_items_without_values(self, mocked_client):
+        mocked_client.return_value.interactions.create.return_value = SimpleNamespace(
+            output_text='{"sugerencias":[{"campo":"estado_fuente"}]}'
+        )
+
+        with self.assertRaises(GeminiInvalidResponseError):
+            generar_sugerencias_nota(self.note, self.reception)
+
+        self.assertFalse(SugerenciaIA.objects.filter(nota=self.note).exists())

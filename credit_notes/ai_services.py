@@ -87,34 +87,37 @@ def generar_sugerencias_nota(nota, operador):
 
     class SuggestedField(BaseModel):
         campo: str = Field(
-        description=(
-            "Nombre exacto del campo sugerido. Valores permitidos: "
-            "tipo_nota, origen_tributario, valor_nominal, "
-            "saldo_disponible, minimo_recibir, fecha_emision "
-            "o estado_fuente."
+            description=(
+                "Nombre exacto del campo sugerido. Valores permitidos: "
+                "tipo_nota, origen_tributario, valor_nominal, "
+                "saldo_disponible, minimo_recibir, fecha_emision "
+                "o estado_fuente."
+            )
         )
-    )
-    valor_sugerido: str = Field(
-        description="Valor sugerido expresado como texto."
-    )
-    confianza: float = Field(
-        default=0.70,
-        ge=0,
-        le=1,
-        description="Confianza entre 0 y 1.",
-    )
-    fuente: str = Field(
-        description="Antecedente o documento utilizado."
-    )
-    evidencia: str = Field(
-        description="Explicación breve de la evidencia encontrada."
-    )
+        valor_sugerido: str = Field(
+            min_length=1,
+            description="Valor sugerido expresado como texto.",
+        )
+        confianza: float = Field(
+            default=0.70,
+            ge=0,
+            le=1,
+            description="Confianza entre 0 y 1.",
+        )
+        fuente: str = Field(
+            min_length=1,
+            description="Antecedente o documento utilizado.",
+        )
+        evidencia: str = Field(
+            min_length=1,
+            description="Explicación breve de la evidencia encontrada.",
+        )
 
 
     class SuggestionBundle(BaseModel):
         sugerencias: list[SuggestedField] = Field(
-        default_factory=list
-    )
+            default_factory=list
+        )
 
     payload = {
         "actual": _serialize_note(nota),
