@@ -633,3 +633,83 @@ class AgenticArchitectureTests(WorkflowTests):
             generar_sugerencias_nota(self.note, self.reception)
 
         self.assertFalse(SugerenciaIA.objects.filter(nota=self.note).exists())
+
+    def _create_suggestion(self, field, value):
+        return SugerenciaIA.objects.create(
+            nota=self.note,
+            campo=field,
+            valor_actual=str(getattr(self.note, field, "") or ""),
+            valor_sugerido=value,
+            confianza=Decimal("0.80"),
+            fuente="Documento de prueba",
+            evidencia="Valor identificado en el respaldo.",
+            generada_por_modelo="gemini-test",
+        )
+
+    def test_accept_all_suggestions_applies_every_pending_value(self):
+        self._create_suggestion("estado_fuente", "VIGENTE")
+        self._create_suggestion("minimo_recibir", "925.00")
+        client = HttpClient()
+        client.force_login(self.reception)
+
+        response = client.post(
+            reverse("suggestions_accept_all", args=[self.note.pk]),
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.note.refresh_from_db()
+        self.assertEqual(self.note.estado_fuente, "VIGENTE")
+        self.assertEqual(self.note.minimo_recibir, Decimal("925.00"))
+        self.assertEqual(
+            self.note.sugerencias_ia.filter(
+                estado=SugerenciaIA.Estado.ACEPTADA,
+                revisada_por=self.reception,
+            ).count(),
+            2,
+        )
+
+    def test_accept_all_suggestions_is_atomic_when_one_value_is_invalid(self):
+        self._create_suggestion("saldo_disponible", "975.00")
+        self._create_suggestion("fecha_emision", "fecha-invalida")
+        original_balance = self.note.saldo_disponible
+        client = HttpClient()
+        client.force_login(self.reception)
+
+        response = client.post(
+            reverse("suggestions_accept_all", args=[self.note.pk]),
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.note.refresh_from_db()
+        self.assertEqual(self.note.saldo_disponible, original_balance)
+        self.assertEqual(
+            self.note.sugerencias_ia.filter(
+                estado=SugerenciaIA.Estado.PENDIENTE
+            ).count(),
+            2,
+        )
+
+    def test_reject_all_suggestions_preserves_note_values(self):
+        self._create_suggestion("estado_fuente", "VIGENTE")
+        self._create_suggestion("minimo_recibir", "925.00")
+        original_minimum = self.note.minimo_recibir
+        client = HttpClient()
+        client.force_login(self.reception)
+
+        response = client.post(
+            reverse("suggestions_reject_all", args=[self.note.pk]),
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.note.refresh_from_db()
+        self.assertEqual(self.note.minimo_recibir, original_minimum)
+        self.assertEqual(
+            self.note.sugerencias_ia.filter(
+                estado=SugerenciaIA.Estado.RECHAZADA,
+                revisada_por=self.reception,
+            ).count(),
+            2,
+        )

@@ -519,10 +519,15 @@ def ai_generate_suggestions(request, pk):
 def suggestion_review(request, pk):
     note = _get_note_for_user(request.user, pk)
     suggestions = note.sugerencias_ia.all()
+    pending_count = suggestions.filter(estado=SugerenciaIA.Estado.PENDIENTE).count()
     return render(
         request,
         "credit_notes/suggestion_review.html",
-        {"nota": note, "sugerencias": suggestions},
+        {
+            "nota": note,
+            "sugerencias": suggestions,
+            "pending_count": pending_count,
+        },
     )
 
 
@@ -550,7 +555,7 @@ def suggestion_accept(request, suggestion_id):
     suggestion = get_object_or_404(
         SugerenciaIA.objects.select_related("nota"), pk=suggestion_id
     )
-    note = suggestion.nota
+    note = _get_note_for_user(request.user, suggestion.nota_id)
     if suggestion.estado != SugerenciaIA.Estado.PENDIENTE:
         messages.info(request, "La sugerencia ya fue revisada.")
         return redirect("suggestion_review", pk=note.pk)
@@ -595,6 +600,7 @@ def suggestion_reject(request, suggestion_id):
     suggestion = get_object_or_404(
         SugerenciaIA.objects.select_related("nota"), pk=suggestion_id
     )
+    _get_note_for_user(request.user, suggestion.nota_id)
     if suggestion.estado == SugerenciaIA.Estado.PENDIENTE:
         suggestion.estado = SugerenciaIA.Estado.RECHAZADA
         suggestion.revisada_por = request.user
@@ -609,6 +615,127 @@ def suggestion_reject(request, suggestion_id):
         )
         messages.success(request, "Sugerencia rechazada.")
     return redirect("suggestion_review", pk=suggestion.nota.pk)
+
+
+@role_required(1)
+@require_POST
+def suggestions_accept_all(request, pk):
+    note = _get_note_for_user(request.user, pk)
+    allowed_fields = {
+        "tipo_nota",
+        "origen_tributario",
+        "valor_nominal",
+        "saldo_disponible",
+        "minimo_recibir",
+        "fecha_emision",
+        "estado_fuente",
+    }
+    try:
+        with transaction.atomic():
+            note = NotaCredito.objects.select_for_update().get(pk=note.pk)
+            pending = list(
+                SugerenciaIA.objects.select_for_update().filter(
+                    nota=note,
+                    estado=SugerenciaIA.Estado.PENDIENTE,
+                )
+            )
+            if not pending:
+                messages.info(request, "No hay sugerencias pendientes para aceptar.")
+                return redirect("suggestion_review", pk=note.pk)
+
+            converted_values = []
+            for suggestion in pending:
+                if suggestion.campo not in allowed_fields:
+                    raise ValueError(
+                        f"El campo {suggestion.campo} no está permitido."
+                    )
+                converted_values.append(
+                    (
+                        suggestion,
+                        _coerce_suggestion(
+                            note,
+                            suggestion.campo,
+                            suggestion.valor_sugerido,
+                        ),
+                    )
+                )
+
+            for suggestion, converted in converted_values:
+                setattr(note, suggestion.campo, converted)
+            note.save()
+
+            reviewed_at = timezone.now()
+            for suggestion, _converted in converted_values:
+                suggestion.estado = SugerenciaIA.Estado.ACEPTADA
+                suggestion.revisada_por = request.user
+                suggestion.revisada_en = reviewed_at
+                suggestion.save(
+                    update_fields=["estado", "revisada_por", "revisada_en"]
+                )
+                registrar_evento(
+                    note,
+                    request.user,
+                    "SUGERENCIA_ACEPTADA",
+                    f"Se aceptó la sugerencia para {suggestion.campo}.",
+                    {
+                        "valor": suggestion.valor_sugerido,
+                        "fuente": suggestion.fuente,
+                        "accion_masiva": True,
+                    },
+                )
+        messages.success(
+            request,
+            f"Se aplicaron y registraron {len(pending)} sugerencias.",
+        )
+    except (ValueError, ValidationError) as exc:
+        messages.error(
+            request,
+            f"No se aplicó ninguna sugerencia: {exc}",
+        )
+    except Exception:
+        messages.error(
+            request,
+            "No se aplicó ninguna sugerencia por un error interno.",
+        )
+    return redirect("suggestion_review", pk=note.pk)
+
+
+@role_required(1)
+@require_POST
+def suggestions_reject_all(request, pk):
+    note = _get_note_for_user(request.user, pk)
+    with transaction.atomic():
+        pending = list(
+            SugerenciaIA.objects.select_for_update().filter(
+                nota=note,
+                estado=SugerenciaIA.Estado.PENDIENTE,
+            )
+        )
+        if not pending:
+            messages.info(request, "No hay sugerencias pendientes para rechazar.")
+            return redirect("suggestion_review", pk=note.pk)
+
+        reviewed_at = timezone.now()
+        for suggestion in pending:
+            suggestion.estado = SugerenciaIA.Estado.RECHAZADA
+            suggestion.revisada_por = request.user
+            suggestion.revisada_en = reviewed_at
+            suggestion.save(
+                update_fields=["estado", "revisada_por", "revisada_en"]
+            )
+            registrar_evento(
+                note,
+                request.user,
+                "SUGERENCIA_RECHAZADA",
+                f"Se rechazó la sugerencia para {suggestion.campo}.",
+                {
+                    "valor": suggestion.valor_sugerido,
+                    "fuente": suggestion.fuente,
+                    "accion_masiva": True,
+                },
+            )
+    messages.success(request, f"Se rechazaron {len(pending)} sugerencias.")
+    return redirect("suggestion_review", pk=note.pk)
 
 
 @role_required(2)

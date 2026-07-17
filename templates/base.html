@@ -13,7 +13,7 @@
   {% block extra_head %}{% endblock %}
 </head>
 <body>
-<div id="operationOverlay" class="operation-overlay" aria-hidden="true" aria-live="polite"><div class="operation-panel"><div class="operation-spinner"></div><h2>Estamos procesando tu solicitud</h2><p id="operationMessage">Todo va bien. Estamos validando la información de forma segura; por favor, espera un momento.</p></div></div>
+<div id="operationOverlay" class="operation-overlay" aria-hidden="true" aria-live="polite"><div class="operation-panel"><div class="operation-spinner"></div><h2 id="operationTitle">Procesando operación</h2><p id="operationMessage"></p></div></div>
 {% if user.is_authenticated %}
 <nav class="navbar navbar-expand-lg navbar-light app-navbar sticky-top" aria-label="Navegación principal">
   <div class="container-fluid px-lg-4">
@@ -102,11 +102,13 @@
 <script>
 document.addEventListener('submit', function (event) {
   const form = event.target;
+  if (form.dataset.loading !== 'true') return;
   if (form.dataset.submitting === 'true') { event.preventDefault(); return; }
-  if (form.method.toLowerCase() !== 'post' || !form.checkValidity() || form.dataset.noLoading === 'true') return;
+  if (form.method.toLowerCase() !== 'post' || !form.checkValidity()) return;
   form.dataset.submitting = 'true';
   const overlay = document.getElementById('operationOverlay');
-  document.getElementById('operationMessage').textContent = form.dataset.loadingMessage || 'Todo va bien. Estamos procesando la información de forma segura; por favor, espera un momento.';
+  document.getElementById('operationTitle').textContent = form.dataset.loadingTitle;
+  document.getElementById('operationMessage').textContent = form.dataset.loadingMessage;
   overlay.classList.add('is-visible'); overlay.setAttribute('aria-hidden', 'false'); document.body.classList.add('operation-locked');
   form.querySelectorAll('button, input[type="submit"]').forEach(function (el) {
     el.dataset.operationOriginalDisabled = el.disabled ? 'true' : 'false';
@@ -118,7 +120,9 @@ document.addEventListener('submit', function (event) {
   });
 });
 window.addEventListener('pageshow', function () {
-  document.getElementById('operationOverlay')?.classList.remove('is-visible');
+  const overlay = document.getElementById('operationOverlay');
+  overlay?.classList.remove('is-visible');
+  overlay?.setAttribute('aria-hidden', 'true');
   document.body.classList.remove('operation-locked');
   document.querySelectorAll('form[data-submitting="true"]').forEach(function (form) {
     delete form.dataset.submitting;
