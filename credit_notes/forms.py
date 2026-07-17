@@ -9,7 +9,6 @@ from .models import (
     DocumentoRespaldo,
     NotaCredito,
     OrdenNegociacion,
-    ValidacionNota,
     SolicitudAprobacion,
 )
 
@@ -128,17 +127,6 @@ class DocumentoRespaldoForm(BootstrapFormMixin, forms.ModelForm):
         self.fields["archivo_url"].help_text = "El hash SHA-256 se genera automáticamente y no puede editarse."
 
 
-class ValidacionNotaForm(BootstrapFormMixin, forms.ModelForm):
-    class Meta:
-        model = ValidacionNota
-        fields = ["fuente", "existe", "saldo_fuente", "estado_fuente", "bloqueada", "motivo_bloqueo", "campos_faltantes", "inconsistencias", "duplicados", "coincidencias_riesgo", "siguiente_accion", "explicacion_ia", "resultado"]
-        widgets = {"explicacion_ia": forms.Textarea(attrs={"rows": 4}), "siguiente_accion": forms.Textarea(attrs={"rows": 2})}
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.apply_bootstrap()
-
-
 class DeleteReasonForm(BootstrapFormMixin, forms.Form):
     motivo = forms.CharField(max_length=300, widget=forms.Textarea(attrs={"rows": 3}), label="Motivo de eliminación")
 
@@ -240,3 +228,24 @@ class ConfirmacionPublicaForm(BootstrapFormMixin, forms.Form):
         if len(value) < 3 or not any(char.isalpha() for char in value):
             raise forms.ValidationError("Ingrese el nombre completo de quien confirma.")
         return value
+
+
+class DecisionAgenteForm(BootstrapFormMixin, forms.Form):
+    class Decision(models.TextChoices):
+        CONTINUAR = "CONTINUAR", "Continuar al siguiente analisis"
+        ACEPTAR = "ACEPTAR", "Aceptar recomendacion (sin cambiar la nota)"
+        EDITAR = "EDITAR", "Editar antes de continuar"
+        RECHAZAR = "RECHAZAR", "Rechazar recomendacion"
+        NUEVO_ANALISIS = "NUEVO_ANALISIS", "Solicitar nuevo analisis"
+
+    decision = forms.ChoiceField(choices=Decision.choices)
+    observacion = forms.CharField(
+        required=False,
+        max_length=500,
+        widget=forms.Textarea(attrs={"rows": 3}),
+        help_text="Explica el criterio aplicado. No incluyas credenciales ni datos innecesarios.",
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.apply_bootstrap()

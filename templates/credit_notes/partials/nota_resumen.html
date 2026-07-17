@@ -1,0 +1,37 @@
+<div class="section-heading">
+  <div><span class="section-kicker">Vista general</span><h2>Resumen del expediente</h2><p>Información esencial, responsables y acciones disponibles.</p></div>
+</div>
+<div class="row g-4">
+  <div class="col-xl-8">
+    <article class="soft-card section-card">
+      <div class="section-card-header"><div><h3>Datos confirmados</h3><p>Información registrada en la base operativa.</p></div><span class="verified-label"><i class="bi bi-database-check"></i>Guardado</span></div>
+      <div class="row g-3">
+        <div class="col-md-6"><div class="detail-block"><span>Titular / vendedor</span><strong>{{ nota.cliente_vendedor.nombre_razon_social }}</strong><small>{{ nota.cliente_vendedor.ruc_identificacion }}</small></div></div>
+        <div class="col-md-6"><div class="detail-block"><span>Comprador</span><strong>{{ nota.cliente_comprador.nombre_razon_social|default:'No asignado' }}</strong><small>{{ nota.cliente_comprador.ruc_identificacion|default:'' }}</small></div></div>
+        <div class="col-md-6"><div class="detail-block"><span>Tipo de nota</span><strong>{{ nota.get_tipo_nota_display }}</strong></div></div>
+        <div class="col-md-6"><div class="detail-block"><span>Origen tributario</span><strong>{{ nota.get_origen_tributario_display }}</strong></div></div>
+        <div class="col-md-4"><div class="detail-block amount-block"><span>Valor nominal</span><strong>${{ nota.valor_nominal|floatformat:2 }}</strong></div></div>
+        <div class="col-md-4"><div class="detail-block amount-block"><span>Saldo disponible</span><strong>${{ nota.saldo_disponible|floatformat:2 }}</strong></div></div>
+        <div class="col-md-4"><div class="detail-block amount-block"><span>Mínimo a recibir</span><strong>${{ nota.minimo_recibir|floatformat:2 }}</strong></div></div>
+        <div class="col-md-4"><div class="detail-block"><span>Fecha emisión</span><strong>{{ nota.fecha_emision|date:'d/m/Y'|default:'-' }}</strong></div></div>
+        <div class="col-md-4"><div class="detail-block"><span>Estado fuente</span><strong>{{ nota.estado_fuente|default:'Pendiente' }}</strong></div></div>
+        <div class="col-md-4"><div class="detail-block"><span>Máximo descuento</span><strong>{{ nota.descuento_maximo_porcentaje|floatformat:2 }}%</strong></div></div>
+      </div>
+      {% if nota.observaciones_recepcion or nota.observaciones_validacion %}<div class="observation-list mt-4">
+        {% if nota.observaciones_recepcion %}<div><span>Recepción</span><p>{{ nota.observaciones_recepcion }}</p></div>{% endif %}
+        {% if nota.observaciones_validacion %}<div><span>Validación</span><p>{{ nota.observaciones_validacion }}</p></div>{% endif %}
+      </div>{% endif %}
+    </article>
+  </div>
+  <div class="col-xl-4">
+    {% include 'credit_notes/partials/nota_acciones.html' %}
+    <article class="soft-card section-card mt-4">
+      <div class="section-card-header"><div><h3>Responsables</h3><p>Personas asignadas por etapa.</p></div></div>
+      <div class="owner-list">
+        <div><span class="owner-icon"><i class="bi bi-inbox"></i></span><span><small>Recepción</small><strong>{{ nota.recepcionista.get_full_name|default:nota.recepcionista.username }}</strong></span></div>
+        <div><span class="owner-icon"><i class="bi bi-shield-check"></i></span><span><small>Validación</small><strong>{% if nota.contador %}{{ nota.contador.get_full_name|default:nota.contador.username }}{% else %}Pendiente de asignar{% endif %}</strong></span></div>
+        <div><span class="owner-icon"><i class="bi bi-briefcase"></i></span><span><small>Negociación</small><strong>{% if nota.vendedor %}{{ nota.vendedor.get_full_name|default:nota.vendedor.username }}{% else %}Pendiente de asignar{% endif %}</strong></span></div>
+      </div>
+    </article>
+  </div>
+</div>

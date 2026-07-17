@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.conf import settings
@@ -20,7 +20,9 @@ from .ai_services import (
     generar_reporte_negociacion,
     generar_sugerencias_nota,
 )
+from .gemini_service import user_message as gemini_user_message
 from .decorators import role_required
+from .agents import iniciar_analisis, registrar_decision
 from .forms import (
     ClienteForm,
     ConfirmacionPublicaForm,
@@ -28,8 +30,8 @@ from .forms import (
     DocumentoRespaldoForm,
     NotaCreditoForm,
     OrdenNegociacionForm,
-    ValidacionNotaForm,
     DeleteReasonForm,
+    DecisionAgenteForm,
 )
 from .models import (
     Cliente,
@@ -42,6 +44,7 @@ from .models import (
     SugerenciaIA,
     ValidacionNota,
     OperacionIdempotente,
+    EjecucionAgente,
 )
 from .pdf_reports import build_negotiation_pdf
 from .services import (
@@ -72,6 +75,62 @@ def _get_note_for_user(user, pk):
     return note
 
 
+def _acquire_ai_operation(key, operation_type):
+    """Candado persistente con recuperación de ejecuciones abandonadas."""
+    now = timezone.now()
+    expires = now + timedelta(seconds=settings.AI_OPERATION_LOCK_SECONDS)
+    try:
+        with transaction.atomic():
+            OperacionIdempotente.objects.create(
+                clave=key,
+                tipo=operation_type,
+                expira_en=expires,
+                intentos=1,
+            )
+        return True
+    except IntegrityError:
+        with transaction.atomic():
+            operation = OperacionIdempotente.objects.select_for_update().get(clave=key)
+            stale = operation.completada_en is None and (
+                (operation.expira_en and operation.expira_en <= now)
+                or (
+                    operation.expira_en is None
+                    and operation.creada_en
+                    <= now - timedelta(seconds=settings.AI_OPERATION_LOCK_SECONDS)
+                )
+            )
+            if not stale:
+                return False
+            operation.tipo = operation_type
+            operation.expira_en = expires
+            operation.intentos += 1
+            operation.error_tipo = ""
+            operation.resultado = {}
+            operation.save(
+                update_fields=[
+                    "tipo",
+                    "expira_en",
+                    "intentos",
+                    "error_tipo",
+                    "resultado",
+                    "actualizada_en",
+                ]
+            )
+            return True
+
+
+def _finish_ai_operation(key, result_id=""):
+    OperacionIdempotente.objects.filter(clave=key).update(
+        completada_en=timezone.now(), resultado_id=str(result_id or "")
+    )
+
+
+def _fail_ai_operation(key, error_type=""):
+    OperacionIdempotente.objects.filter(
+        clave=key, completada_en__isnull=True
+    ).update(error_tipo=error_type, expira_en=timezone.now())
+
+
 @login_required
 def dashboard(request):
     user = request.user
@@ -88,7 +147,21 @@ def dashboard(request):
         "pendientes_confirmacion": base.filter(
             estado_flujo=NotaCredito.EstadoFlujo.PENDIENTE_CONFIRMACIONES
         ).count(),
+        "negociaciones_activas": base.filter(
+            estado_flujo__in=[
+                NotaCredito.EstadoFlujo.EN_NEGOCIACION,
+                NotaCredito.EstadoFlujo.PENDIENTE_CONFIRMACIONES,
+            ]
+        ).count(),
+        "cerradas": base.filter(
+            estado_flujo=NotaCredito.EstadoFlujo.CERRADA_DEMO
+        ).count(),
         "recientes": base.select_related("cliente_vendedor")[:8],
+        "analisis_recientes": EjecucionAgente.objects.filter(operador=user)
+        .select_related("nota")[:5],
+        "analisis_pendientes": EjecucionAgente.objects.filter(
+            operador=user, estado=EjecucionAgente.Estado.ESPERANDO_HUMANO
+        ).count(),
     }
     if user.is_superuser:
         context["mis_casos"] = base.count()
@@ -247,6 +320,11 @@ def nota_detail(request, pk):
     order = getattr(note, "orden_negociacion", None)
     if order and order.eliminado_en:
         order = None
+    execution = (
+        note.ejecuciones_agentes.select_related("operador")
+        .prefetch_related("eventos")
+        .first()
+    )
     return render(
         request,
         "credit_notes/nota_detail.html",
@@ -257,8 +335,59 @@ def nota_detail(request, pk):
             "orden": order,
             "eventos": note.eventos.select_related("operador")[:30],
             "reportes": note.reportes_ia.all()[:10],
+            "ejecucion_agente": execution,
+            "estado_agente": execution.estado_compartido if execution else {},
+            "decision_agente_form": (
+                DecisionAgenteForm()
+                if execution
+                and execution.estado == EjecucionAgente.Estado.ESPERANDO_HUMANO
+                else None
+            ),
         },
     )
+
+
+@login_required
+@require_POST
+def agent_analysis_start(request, pk):
+    note = _get_note_for_user(request.user, pk)
+    execution, created = iniciar_analisis(note, request.user)
+    if not created:
+        messages.info(request, "Ya existe un analisis activo o esperando tu revision.")
+    elif execution.estado == EjecucionAgente.Estado.ERROR_CONTROLADO:
+        messages.error(request, execution.error_amigable)
+    else:
+        messages.success(
+            request,
+            "El centro de analisis preparo el expediente y espera tu revision.",
+        )
+    return redirect("nota_detail", pk=note.pk)
+
+
+@login_required
+@require_POST
+def agent_analysis_decide(request, execution_id):
+    execution = get_object_or_404(
+        EjecucionAgente.objects.select_related("nota"), pk=execution_id
+    )
+    note = _get_note_for_user(request.user, execution.nota_id)
+    form = DecisionAgenteForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "Selecciona una decision valida.")
+        return redirect("nota_detail", pk=note.pk)
+    try:
+        registrar_decision(
+            execution,
+            request.user,
+            form.cleaned_data["decision"],
+            form.cleaned_data["observacion"],
+        )
+        messages.success(request, "Decision humana registrada con trazabilidad.")
+    except PermissionError:
+        raise Http404
+    except ValueError as exc:
+        messages.info(request, str(exc))
+    return redirect("nota_detail", pk=note.pk)
 
 
 @role_required(1, 2)
@@ -364,18 +493,16 @@ def ai_generate_suggestions(request, pk):
         messages.error(request, "Solo se generan sugerencias durante recepción/corrección.")
         return redirect("nota_detail", pk=note.pk)
     key = f"sugerencias:{note.pk}:{note.actualizado_en.isoformat()}"
-    try:
-        OperacionIdempotente.objects.create(clave=key, tipo="SUGERENCIAS_IA")
-    except IntegrityError:
+    if not _acquire_ai_operation(key, "SUGERENCIAS_IA"):
         messages.info(request, "Esta solicitud ya fue procesada o continúa en curso. No se duplicarán datos.")
         return redirect("suggestion_review", pk=note.pk)
     try:
         created = generar_sugerencias_nota(note, request.user)
     except GeminiServiceError as exc:
-        OperacionIdempotente.objects.filter(clave=key, completada_en__isnull=True).delete()
-        messages.error(request, str(exc))
+        _fail_ai_operation(key, type(exc).__name__)
+        messages.error(request, gemini_user_message(exc))
         return redirect("nota_detail", pk=note.pk)
-    OperacionIdempotente.objects.filter(clave=key).update(completada_en=timezone.now())
+    _finish_ai_operation(key)
 
     if created:
         messages.success(
@@ -392,10 +519,15 @@ def ai_generate_suggestions(request, pk):
 def suggestion_review(request, pk):
     note = _get_note_for_user(request.user, pk)
     suggestions = note.sugerencias_ia.all()
+    pending_count = suggestions.filter(estado=SugerenciaIA.Estado.PENDIENTE).count()
     return render(
         request,
         "credit_notes/suggestion_review.html",
-        {"nota": note, "sugerencias": suggestions},
+        {
+            "nota": note,
+            "sugerencias": suggestions,
+            "pending_count": pending_count,
+        },
     )
 
 
@@ -423,7 +555,7 @@ def suggestion_accept(request, suggestion_id):
     suggestion = get_object_or_404(
         SugerenciaIA.objects.select_related("nota"), pk=suggestion_id
     )
-    note = suggestion.nota
+    note = _get_note_for_user(request.user, suggestion.nota_id)
     if suggestion.estado != SugerenciaIA.Estado.PENDIENTE:
         messages.info(request, "La sugerencia ya fue revisada.")
         return redirect("suggestion_review", pk=note.pk)
@@ -468,6 +600,7 @@ def suggestion_reject(request, suggestion_id):
     suggestion = get_object_or_404(
         SugerenciaIA.objects.select_related("nota"), pk=suggestion_id
     )
+    _get_note_for_user(request.user, suggestion.nota_id)
     if suggestion.estado == SugerenciaIA.Estado.PENDIENTE:
         suggestion.estado = SugerenciaIA.Estado.RECHAZADA
         suggestion.revisada_por = request.user
@@ -482,6 +615,127 @@ def suggestion_reject(request, suggestion_id):
         )
         messages.success(request, "Sugerencia rechazada.")
     return redirect("suggestion_review", pk=suggestion.nota.pk)
+
+
+@role_required(1)
+@require_POST
+def suggestions_accept_all(request, pk):
+    note = _get_note_for_user(request.user, pk)
+    allowed_fields = {
+        "tipo_nota",
+        "origen_tributario",
+        "valor_nominal",
+        "saldo_disponible",
+        "minimo_recibir",
+        "fecha_emision",
+        "estado_fuente",
+    }
+    try:
+        with transaction.atomic():
+            note = NotaCredito.objects.select_for_update().get(pk=note.pk)
+            pending = list(
+                SugerenciaIA.objects.select_for_update().filter(
+                    nota=note,
+                    estado=SugerenciaIA.Estado.PENDIENTE,
+                )
+            )
+            if not pending:
+                messages.info(request, "No hay sugerencias pendientes para aceptar.")
+                return redirect("suggestion_review", pk=note.pk)
+
+            converted_values = []
+            for suggestion in pending:
+                if suggestion.campo not in allowed_fields:
+                    raise ValueError(
+                        f"El campo {suggestion.campo} no está permitido."
+                    )
+                converted_values.append(
+                    (
+                        suggestion,
+                        _coerce_suggestion(
+                            note,
+                            suggestion.campo,
+                            suggestion.valor_sugerido,
+                        ),
+                    )
+                )
+
+            for suggestion, converted in converted_values:
+                setattr(note, suggestion.campo, converted)
+            note.save()
+
+            reviewed_at = timezone.now()
+            for suggestion, _converted in converted_values:
+                suggestion.estado = SugerenciaIA.Estado.ACEPTADA
+                suggestion.revisada_por = request.user
+                suggestion.revisada_en = reviewed_at
+                suggestion.save(
+                    update_fields=["estado", "revisada_por", "revisada_en"]
+                )
+                registrar_evento(
+                    note,
+                    request.user,
+                    "SUGERENCIA_ACEPTADA",
+                    f"Se aceptó la sugerencia para {suggestion.campo}.",
+                    {
+                        "valor": suggestion.valor_sugerido,
+                        "fuente": suggestion.fuente,
+                        "accion_masiva": True,
+                    },
+                )
+        messages.success(
+            request,
+            f"Se aplicaron y registraron {len(pending)} sugerencias.",
+        )
+    except (ValueError, ValidationError) as exc:
+        messages.error(
+            request,
+            f"No se aplicó ninguna sugerencia: {exc}",
+        )
+    except Exception:
+        messages.error(
+            request,
+            "No se aplicó ninguna sugerencia por un error interno.",
+        )
+    return redirect("suggestion_review", pk=note.pk)
+
+
+@role_required(1)
+@require_POST
+def suggestions_reject_all(request, pk):
+    note = _get_note_for_user(request.user, pk)
+    with transaction.atomic():
+        pending = list(
+            SugerenciaIA.objects.select_for_update().filter(
+                nota=note,
+                estado=SugerenciaIA.Estado.PENDIENTE,
+            )
+        )
+        if not pending:
+            messages.info(request, "No hay sugerencias pendientes para rechazar.")
+            return redirect("suggestion_review", pk=note.pk)
+
+        reviewed_at = timezone.now()
+        for suggestion in pending:
+            suggestion.estado = SugerenciaIA.Estado.RECHAZADA
+            suggestion.revisada_por = request.user
+            suggestion.revisada_en = reviewed_at
+            suggestion.save(
+                update_fields=["estado", "revisada_por", "revisada_en"]
+            )
+            registrar_evento(
+                note,
+                request.user,
+                "SUGERENCIA_RECHAZADA",
+                f"Se rechazó la sugerencia para {suggestion.campo}.",
+                {
+                    "valor": suggestion.valor_sugerido,
+                    "fuente": suggestion.fuente,
+                    "accion_masiva": True,
+                },
+            )
+    messages.success(request, f"Se rechazaron {len(pending)} sugerencias.")
+    return redirect("suggestion_review", pk=note.pk)
 
 
 @role_required(2)
@@ -514,9 +768,7 @@ def validation_run(request, pk):
         messages.error(request, "El caso no está disponible para validación.")
         return redirect("nota_detail", pk=note.pk)
     key = f"validacion:{note.pk}:{note.actualizado_en.isoformat()}"
-    try:
-        OperacionIdempotente.objects.create(clave=key, tipo="VALIDACION_IA")
-    except IntegrityError:
+    if not _acquire_ai_operation(key, "VALIDACION_IA"):
         messages.info(request, "La validación ya fue solicitada. Se muestra el resultado existente.")
         return redirect("validation_detail", pk=note.pk)
     validation = ejecutar_validacion_simulada(note, request.user)
@@ -528,32 +780,42 @@ def validation_run(request, pk):
     except GeminiServiceError as exc:
         messages.warning(
             request,
-            "La validación por reglas quedó registrada, pero Gemini no generó "
-            f"la explicación: {exc}",
+            "La validación por reglas quedó registrada. " + gemini_user_message(exc),
         )
-    OperacionIdempotente.objects.filter(clave=key).update(completada_en=timezone.now(), resultado_id=str(validation.pk))
+    _finish_ai_operation(key, validation.pk)
     return redirect("validation_detail", pk=note.pk)
 
 
 @role_required(2)
-def validation_edit(request, validation_id):
-    validation = get_object_or_404(ValidacionNota, pk=validation_id, eliminado_en__isnull=True)
-    note = _get_note_for_user(request.user, validation.nota_id)
-    form = ValidacionNotaForm(request.POST or None, instance=validation)
-    if request.method == "POST" and form.is_valid():
-        with transaction.atomic():
-            form.save()
-            registrar_evento(note, request.user, "VALIDACION_EDITADA", "El contador actualizó una validación.", {"validacion": str(validation.pk)})
-        messages.success(request, "Validación actualizada con trazabilidad.")
+@require_POST
+def validation_explanation_retry(request, pk):
+    note = _get_note_for_user(request.user, pk)
+    validation = note.validaciones.filter(eliminado_en__isnull=True).first()
+    if not validation:
+        messages.error(request, "Primero ejecuta la validación por reglas.")
         return redirect("validation_detail", pk=note.pk)
-    return render(request, "credit_notes/form.html", {"form": form, "titulo": "Editar validación", "nota": note})
-
-
-@role_required(2)
-def validation_delete(request, validation_id):
-    validation = get_object_or_404(ValidacionNota, pk=validation_id, eliminado_en__isnull=True)
-    note = _get_note_for_user(request.user, validation.nota_id)
-    return _delete_view(request, validation, "Eliminar validación", "nota_detail", note)
+    key = f"explicacion-validacion:{validation.pk}"
+    if not _acquire_ai_operation(key, "EXPLICACION_VALIDACION_IA"):
+        messages.info(request, "La explicación ya fue generada o continúa en proceso.")
+        return redirect("validation_detail", pk=note.pk)
+    try:
+        generar_explicacion_validacion(validation)
+        _finish_ai_operation(key, validation.pk)
+        registrar_evento(
+            note,
+            request.user,
+            "EXPLICACION_VALIDACION_GENERADA",
+            "Se generó una explicación asistida sobre las reglas ya guardadas.",
+            {"validacion": str(validation.pk)},
+        )
+        messages.success(request, "Explicación asistida generada para revisión.")
+    except GeminiServiceError as exc:
+        _fail_ai_operation(key, type(exc).__name__)
+        messages.warning(
+            request,
+            gemini_user_message(exc) + " La validación por reglas permanece guardada.",
+        )
+    return redirect("validation_detail", pk=note.pk)
 
 
 @role_required(2)
@@ -694,19 +956,21 @@ def report_generate(request, pk):
         order = None
     version = order.actualizado_en.isoformat() if order else note.actualizado_en.isoformat()
     key = f"reporte:{note.pk}:{version}"
-    try:
-        OperacionIdempotente.objects.create(clave=key, tipo="REPORTE_IA")
-    except IntegrityError:
+    if not _acquire_ai_operation(key, "REPORTE_IA"):
         messages.info(request, "El reporte para esta versión ya fue generado o está en proceso.")
         return redirect("nota_detail", pk=note.pk)
     try:
         report = generar_reporte_negociacion(note, request.user)
-        OperacionIdempotente.objects.filter(clave=key).update(completada_en=timezone.now(), resultado_id=str(report.pk))
+        _finish_ai_operation(key, report.pk)
         messages.success(request, "Gemini generó el borrador para revisión.")
         return redirect("report_detail", report_id=report.pk)
-    except (ValueError, GeminiServiceError) as exc:
-        OperacionIdempotente.objects.filter(clave=key, completada_en__isnull=True).delete()
-        messages.error(request, str(exc))
+    except ValueError:
+        _fail_ai_operation(key, "DATOS_INCOMPLETOS")
+        messages.error(request, "Primero completa y guarda la orden de negociación.")
+        return redirect("nota_detail", pk=note.pk)
+    except GeminiServiceError as exc:
+        _fail_ai_operation(key, type(exc).__name__)
+        messages.error(request, gemini_user_message(exc))
         return redirect("nota_detail", pk=note.pk)
 
 
@@ -736,9 +1000,6 @@ def approval_requests_create(request, pk):
     if not order or order.eliminado_en:
         messages.error(request, "Primero crea la orden de negociación.")
         return redirect("nota_detail", pk=note.pk)
-    if not note.reportes_ia.exists():
-        messages.error(request, "Genera y revisa al menos un reporte antes de solicitar confirmaciones.")
-        return redirect("nota_detail", pk=note.pk)
     with transaction.atomic():
         snapshot = {"version": order.version, "numero_titulo": note.numero_titulo, "vendedor": note.cliente_vendedor.nombre_razon_social, "comprador": order.comprador.nombre_razon_social, "valor_venta": str(order.valor_venta), "porcentaje_descuento": str(order.porcentaje_descuento), "fecha_propuesta": order.fecha_propuesta.isoformat(), "vigencia_hasta": order.vigencia_hasta.isoformat() if order.vigencia_hasta else "", "terminos": order.terminos, "observaciones": order.observaciones}
         seller_request, _ = SolicitudAprobacion.objects.get_or_create(
@@ -762,7 +1023,11 @@ def approval_requests_create(request, pk):
             request.user,
             "CONFIRMACIONES_SOLICITADAS",
             "Se generaron enlaces únicos para vendedor y comprador.",
-            {"solicitudes_generadas": 2, "version_contrato": order.version},
+            {
+                "solicitudes_generadas": 2,
+                "version_contrato": order.version,
+                "reporte_adjunto": note.reportes_ia.exists(),
+            },
         )
     messages.success(request, "Enlaces de confirmación generados.")
     return redirect("approval_links", pk=note.pk)
