@@ -96,7 +96,7 @@ def get_profile(name="fast"):
         "fast",
         settings.GEMINI_FAST_MODEL,
         settings.GEMINI_FAST_THINKING_LEVEL,
-        min(settings.GEMINI_MAX_OUTPUT_TOKENS, 512),
+        min(settings.GEMINI_MAX_OUTPUT_TOKENS, 3000),
     )
 
 
